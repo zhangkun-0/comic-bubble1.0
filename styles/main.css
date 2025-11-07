@@ -443,6 +443,14 @@ button[data-active='true'] {
   pointer-events: none;
 }
 
+.panel-image-frame {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
 .panel-image {
   position: absolute;
   top: 0;
