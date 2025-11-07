@@ -39,6 +39,66 @@
           <button id="remove-bubble" class="danger" type="button" disabled>删除对话框</button>
         </div>
         <p class="hint">选中对话框后按 Delete 键也可删除。</p>
+
+        <div class="section" id="panel-controls">
+          <h2>漫画分格</h2>
+          <p class="hint">导入图片后可在此调整漫画页框与格框。</p>
+          <label for="panel-margin-horizontal">漫画页框左右间距</label>
+          <input
+            id="panel-margin-horizontal"
+            type="number"
+            min="0"
+            value="60"
+          />
+          <label for="panel-margin-vertical">漫画页框上下间距</label>
+          <input
+            id="panel-margin-vertical"
+            type="number"
+            min="0"
+            value="60"
+          />
+          <label for="panel-line-width">漫画格框线条</label>
+          <input
+            id="panel-line-width"
+            type="number"
+            min="1"
+            value="4"
+          />
+          <label for="panel-gap-horizontal">横向间隙</label>
+          <input
+            id="panel-gap-horizontal"
+            type="number"
+            min="0"
+            value="16"
+          />
+          <label for="panel-gap-vertical">纵向间隙</label>
+          <input
+            id="panel-gap-vertical"
+            type="number"
+            min="0"
+            value="24"
+          />
+          <label for="panel-frame-color">格框外部颜色</label>
+          <select id="panel-frame-color">
+            <option value="white" selected>白色</option>
+            <option value="black">黑色</option>
+          </select>
+          <label for="panel-image-rotation">格框内图片旋转</label>
+          <input
+            id="panel-image-rotation"
+            type="range"
+            min="-180"
+            max="180"
+            value="0"
+          />
+          <p class="hint">在漫画页框内左键拖拽可切分格框，按住 Shift 可拖动画格。</p>
+        </div>
+        <input
+          id="hidden-panel-image-input"
+          class="visually-hidden-input"
+          type="file"
+          accept="image/*"
+        />
       </aside>
 
       <main id="editor">
@@ -46,9 +106,14 @@
           <div id="placeholder" class="no-image-placeholder">请先导入漫画图片</div>
           <div id="scene">
             <img id="base-image" alt="" />
+            <div id="panel-layer">
+              <svg id="panel-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+              <div id="panel-image-layer"></div>
+            </div>
             <svg id="bubble-layer" xmlns="http://www.w3.org/2000/svg"></svg>
           </div>
           <div id="selection-overlay" class="hidden"></div>
+          <div id="panel-overlay" class="hidden"></div>
           <textarea id="inline-editor" class="hidden" spellcheck="false"></textarea>
         </div>
         <div id="status-bar">

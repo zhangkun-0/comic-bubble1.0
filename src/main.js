@@ -13,6 +13,7 @@ const elements = {
   baseImage: document.getElementById('base-image'),
   placeholder: document.getElementById('placeholder'),
   selectionOverlay: document.getElementById('selection-overlay'),
+  panelOverlay: document.getElementById('panel-overlay'),
   inlineEditor: document.getElementById('inline-editor'),
   zoomIndicator: document.getElementById('zoom-indicator'),
   positionIndicator: document.getElementById('position-indicator'),
@@ -24,11 +25,23 @@ const elements = {
   exportFormat: document.getElementById('export-format'),
   exportButton: document.getElementById('export'),
   measureBox: document.getElementById('measure-box'),
+  panelLayer: document.getElementById('panel-layer'),
+  panelSvg: document.getElementById('panel-svg'),
+  panelImageLayer: document.getElementById('panel-image-layer'),
+  panelMarginHorizontal: document.getElementById('panel-margin-horizontal'),
+  panelMarginVertical: document.getElementById('panel-margin-vertical'),
+  panelLineWidth: document.getElementById('panel-line-width'),
+  panelGapHorizontal: document.getElementById('panel-gap-horizontal'),
+  panelGapVertical: document.getElementById('panel-gap-vertical'),
+  panelFrameColor: document.getElementById('panel-frame-color'),
+  panelImageRotation: document.getElementById('panel-image-rotation'),
+  hiddenPanelImageInput: document.getElementById('hidden-panel-image-input'),
 };
 
 const HANDLE_DIRECTIONS = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
 const CONTROL_PADDING = 28;
 const MIN_BODY_SIZE = 80;
+const PANEL_MIN_SIZE = 60;
 
 const state = {
   canvas: { width: 1200, height: 1600 },
@@ -48,6 +61,24 @@ const state = {
   pro5_textPaddingPreset: 3,    // 0~3 共四挡，默认 1（适中）
   pro5_autoWrapEnabled: true,   // 默认自动换行 开
   pro5_charsPerLine: 5,         // 4~10，默认 5（中文“字数”，标点不计数）
+  pageFrame: {
+    active: false,
+    x: 0,
+    y: 0,
+    width: 0,
+    height: 0,
+    horizontalMargin: 60,
+    verticalMargin: 60,
+    lineWidth: 4,
+    horizontalGap: 16,
+    verticalGap: 24,
+    frameColor: 'white',
+    panels: [],
+    nextPanelId: 1,
+    selectedPanelId: null,
+  },
+  panelInteraction: null,
+  panelImageTargetId: null,
 };
 
 const overlay = {
@@ -58,6 +89,11 @@ const overlay = {
     apex: null,
     aim: null,
   },
+};
+
+const panelOverlayState = {
+  box: null,
+  handles: new Map(),
 };
  // === pro5_: 把四挡 padding 换算成像素（相对当前字号，更稳妥） ===
  function pro5_computeTextPaddingFromPreset(bubble) {
@@ -148,6 +184,7 @@ let imagePickerInFlight = false;
 
 function init() {
   setupSelectionOverlay();
+  setupPanelOverlay();
   attachEvents();
   elements.strokeWidth.value = state.defaultStrokeWidth; // ← 让UI初始显示 2
   updateSceneSize(state.canvas.width, state.canvas.height);
@@ -156,6 +193,7 @@ function init() {
   pushHistory();
   render();
   pro5_mountRightPanelControls();
+  updatePanelControlsFromState();
 }
 
 function setupSelectionOverlay() {
@@ -176,6 +214,22 @@ function setupSelectionOverlay() {
   overlay.tailHandle.id = 'tail-handle';
   overlay.tailHandle.addEventListener('pointerdown', startTailDrag);
   elements.selectionOverlay.appendChild(overlay.tailHandle);
+}
+
+function setupPanelOverlay() {
+  elements.panelOverlay.classList.add('hidden');
+  panelOverlayState.box = document.createElement('div');
+  panelOverlayState.box.className = 'panel-selection-box';
+  elements.panelOverlay.appendChild(panelOverlayState.box);
+
+  HANDLE_DIRECTIONS.forEach((dir) => {
+    const handle = document.createElement('div');
+    handle.className = 'panel-handle';
+    handle.dataset.direction = dir;
+    handle.addEventListener('pointerdown', (event) => startPanelResize(event, dir));
+    elements.panelOverlay.appendChild(handle);
+    panelOverlayState.handles.set(dir, handle);
+  });
 }
 
 function attachEvents() {
@@ -199,6 +253,20 @@ function attachEvents() {
 
   elements.bubbleLayer.addEventListener('pointerdown', handleBubblePointerDown);
   elements.bubbleLayer.addEventListener('dblclick', handleBubbleDoubleClick);
+
+  elements.panelLayer.addEventListener('pointerdown', handlePanelPointerDown);
+  elements.panelLayer.addEventListener('wheel', handlePanelWheel, { passive: false });
+  elements.panelLayer.addEventListener('contextmenu', (event) => event.preventDefault());
+  elements.panelLayer.addEventListener('dblclick', handlePanelDoubleClick);
+  elements.hiddenPanelImageInput.addEventListener('change', handlePanelImageSelection);
+
+  elements.panelMarginHorizontal.addEventListener('change', handlePanelMarginChange);
+  elements.panelMarginVertical.addEventListener('change', handlePanelMarginChange);
+  elements.panelLineWidth.addEventListener('change', handlePanelStyleChange);
+  elements.panelGapHorizontal.addEventListener('change', handlePanelStyleChange);
+  elements.panelGapVertical.addEventListener('change', handlePanelStyleChange);
+  elements.panelFrameColor.addEventListener('change', handlePanelStyleChange);
+  elements.panelImageRotation.addEventListener('input', handlePanelRotationChange);
 
   document.addEventListener('keydown', handleKeyDown);
 }
@@ -286,6 +354,18 @@ function loadImage(dataUrl) {
     elements.baseImage.width = img.naturalWidth;
     elements.baseImage.height = img.naturalHeight;
     updateSceneSize(img.naturalWidth, img.naturalHeight);
+    state.pageFrame.nextPanelId = 1;
+    state.pageFrame.panels = [];
+    state.pageFrame.selectedPanelId = null;
+    state.pageFrame.horizontalMargin = Number(elements.panelMarginHorizontal?.value || state.pageFrame.horizontalMargin) || 60;
+    state.pageFrame.verticalMargin = Number(elements.panelMarginVertical?.value || state.pageFrame.verticalMargin) || 60;
+    state.pageFrame.lineWidth = Number(elements.panelLineWidth?.value || state.pageFrame.lineWidth) || 4;
+    state.pageFrame.horizontalGap = Number(elements.panelGapHorizontal?.value || state.pageFrame.horizontalGap) || 16;
+    state.pageFrame.verticalGap = Number(elements.panelGapVertical?.value || state.pageFrame.verticalGap) || 24;
+    state.pageFrame.frameColor = elements.panelFrameColor?.value === 'black' ? 'black' : 'white';
+    ensurePageFrameActive();
+    renderPanels();
+    updatePanelControlsFromState();
     fitViewport();
     elements.placeholder.style.display = 'none';
     pushHistory();
@@ -1076,6 +1156,9 @@ function startTailDrag(event) {
 }
 
 function handlePointerMove(event) {
+  if (state.panelInteraction && state.panelInteraction.pointerId === event.pointerId) {
+    handlePanelInteractionMove(event);
+  }
   if (!state.interaction || state.interaction.pointerId !== event.pointerId) return;
   if (state.interaction.type === 'pan') {
     const dx = event.clientX - state.interaction.startX;
@@ -1129,7 +1212,16 @@ function handlePointerMove(event) {
 }
 
 function handlePointerUp(event) {
-  if (!state.interaction || state.interaction.pointerId !== event.pointerId) return;
+  let panelChanged = false;
+  if (state.panelInteraction && state.panelInteraction.pointerId === event.pointerId) {
+    panelChanged = finalizePanelInteraction(event);
+  }
+  if (!state.interaction || state.interaction.pointerId !== event.pointerId) {
+    if (panelChanged) {
+      pushHistory();
+    }
+    return;
+  }
   if (
     state.interaction.type === 'move-bubble' ||
     state.interaction.type === 'resize' ||
@@ -1147,6 +1239,9 @@ function handlePointerUp(event) {
     // ignore
   }
   state.interaction = null;
+  if (panelChanged) {
+    pushHistory();
+  }
 }
 
 function applyResize(bubble, direction, delta) {
@@ -1361,8 +1456,763 @@ function getTextRect(bubble) {
 }
 
 function render() {
+  renderPanels();
   renderBubbles();
   updateSelectionOverlay();
+  updatePanelOverlay();
+}
+
+function updatePanelControlsFromState() {
+  const pf = state.pageFrame;
+  if (!elements.panelMarginHorizontal) return;
+  elements.panelMarginHorizontal.value = Math.round(pf.horizontalMargin);
+  elements.panelMarginVertical.value = Math.round(pf.verticalMargin);
+  elements.panelLineWidth.value = Math.round(pf.lineWidth);
+  elements.panelGapHorizontal.value = Math.round(pf.horizontalGap);
+  elements.panelGapVertical.value = Math.round(pf.verticalGap);
+  elements.panelFrameColor.value = pf.frameColor;
+
+  const rotationControl = elements.panelImageRotation;
+  const panel = getSelectedPanel();
+  if (panel && panel.image) {
+    rotationControl.disabled = false;
+    rotationControl.value = String(panel.image.rotation || 0);
+  } else {
+    rotationControl.disabled = true;
+    rotationControl.value = '0';
+  }
+}
+
+function createPanel(x, y, width, height) {
+  return {
+    id: state.pageFrame.nextPanelId++,
+    x,
+    y,
+    width,
+    height,
+    image: null,
+  };
+}
+
+function getSelectedPanel() {
+  const { selectedPanelId, panels } = state.pageFrame;
+  if (!selectedPanelId) return null;
+  return panels.find((panel) => panel.id === selectedPanelId) || null;
+}
+
+function setSelectedPanel(panelId) {
+  if (panelId === state.pageFrame.selectedPanelId) {
+    updatePanelOverlay();
+    updatePanelControlsFromState();
+    return;
+  }
+  state.pageFrame.selectedPanelId = panelId || null;
+  updatePanelControlsFromState();
+  updatePanelOverlay();
+}
+
+function ensurePageFrameActive() {
+  if (!state.image.width || !state.image.height) {
+    state.pageFrame.active = false;
+    return;
+  }
+  const pf = state.pageFrame;
+  pf.active = true;
+  const oldFrame = { x: pf.x, y: pf.y, width: pf.width, height: pf.height };
+  const maxMarginX = Math.max(0, Math.floor((state.image.width - PANEL_MIN_SIZE) / 2));
+  const maxMarginY = Math.max(0, Math.floor((state.image.height - PANEL_MIN_SIZE) / 2));
+  pf.horizontalMargin = clamp(pf.horizontalMargin, 0, maxMarginX);
+  pf.verticalMargin = clamp(pf.verticalMargin, 0, maxMarginY);
+  pf.x = pf.horizontalMargin;
+  pf.y = pf.verticalMargin;
+  pf.width = Math.max(PANEL_MIN_SIZE, state.image.width - pf.horizontalMargin * 2);
+  pf.height = Math.max(PANEL_MIN_SIZE, state.image.height - pf.verticalMargin * 2);
+  if (!Array.isArray(pf.panels) || pf.panels.length === 0) {
+    pf.panels = [createPanel(pf.x, pf.y, pf.width, pf.height)];
+  } else if (oldFrame.width > 0 && oldFrame.height > 0) {
+    const scaleX = pf.width / oldFrame.width;
+    const scaleY = pf.height / oldFrame.height;
+    pf.panels = pf.panels.map((panel) => {
+      const relativeX = panel.x - oldFrame.x;
+      const relativeY = panel.y - oldFrame.y;
+      const scaled = {
+        ...panel,
+        x: pf.x + relativeX * scaleX,
+        y: pf.y + relativeY * scaleY,
+        width: panel.width * scaleX,
+        height: panel.height * scaleY,
+      };
+      if (scaled.image) {
+        scaled.image.offsetX = (scaled.image.offsetX || 0) * scaleX;
+        scaled.image.offsetY = (scaled.image.offsetY || 0) * scaleY;
+      }
+      return scaled;
+    });
+  }
+}
+
+function clonePageFrame(frame) {
+  return {
+    active: frame.active,
+    x: frame.x,
+    y: frame.y,
+    width: frame.width,
+    height: frame.height,
+    horizontalMargin: frame.horizontalMargin,
+    verticalMargin: frame.verticalMargin,
+    lineWidth: frame.lineWidth,
+    horizontalGap: frame.horizontalGap,
+    verticalGap: frame.verticalGap,
+    frameColor: frame.frameColor,
+    nextPanelId: frame.nextPanelId,
+    selectedPanelId: frame.selectedPanelId,
+    panels: frame.panels.map((panel) => ({
+      id: panel.id,
+      x: panel.x,
+      y: panel.y,
+      width: panel.width,
+      height: panel.height,
+      image: panel.image
+        ? {
+            src: panel.image.src,
+            width: panel.image.width,
+            height: panel.image.height,
+            scale: panel.image.scale,
+            rotation: panel.image.rotation,
+            offsetX: panel.image.offsetX,
+            offsetY: panel.image.offsetY,
+          }
+        : null,
+    })),
+  };
+}
+
+function restorePageFrame(snapshot) {
+  const pf = state.pageFrame;
+  if (!snapshot) {
+    pf.active = false;
+    pf.panels = [];
+    pf.selectedPanelId = null;
+    return;
+  }
+  pf.active = snapshot.active;
+  pf.x = snapshot.x;
+  pf.y = snapshot.y;
+  pf.width = snapshot.width;
+  pf.height = snapshot.height;
+  pf.horizontalMargin = snapshot.horizontalMargin;
+  pf.verticalMargin = snapshot.verticalMargin;
+  pf.lineWidth = snapshot.lineWidth;
+  pf.horizontalGap = snapshot.horizontalGap;
+  pf.verticalGap = snapshot.verticalGap;
+  pf.frameColor = snapshot.frameColor;
+  pf.nextPanelId = snapshot.nextPanelId;
+  pf.selectedPanelId = snapshot.selectedPanelId;
+  pf.panels = snapshot.panels.map((panel) => ({
+    id: panel.id,
+    x: panel.x,
+    y: panel.y,
+    width: panel.width,
+    height: panel.height,
+    image: panel.image
+      ? {
+          src: panel.image.src,
+          width: panel.image.width,
+          height: panel.image.height,
+          scale: panel.image.scale,
+          rotation: panel.image.rotation,
+          offsetX: panel.image.offsetX,
+          offsetY: panel.image.offsetY,
+        }
+      : null,
+  }));
+}
+
+function renderPanels() {
+  const pf = state.pageFrame;
+  if (!pf.active || !state.image.width || !state.image.height) {
+    elements.panelLayer?.setAttribute('data-active', 'false');
+    if (elements.panelSvg) {
+      elements.panelSvg.innerHTML = '';
+    }
+    if (elements.panelImageLayer) {
+      elements.panelImageLayer.innerHTML = '';
+    }
+    return;
+  }
+
+  elements.panelLayer?.setAttribute('data-active', 'true');
+  const maskId = 'panel-mask';
+  const gutterColor = pf.frameColor === 'black' ? '#000000' : '#ffffff';
+  const defs = [
+    `<mask id="${maskId}">`,
+    `<rect x="${pf.x}" y="${pf.y}" width="${pf.width}" height="${pf.height}" fill="white" />`,
+  ];
+  const panelFills = [];
+  const rects = [];
+  const placeholders = [];
+  const strokeColor = '#000000';
+  pf.panels.forEach((panel) => {
+    defs.push(
+      `<rect x="${panel.x}" y="${panel.y}" width="${panel.width}" height="${panel.height}" fill="black" />`,
+    );
+    panelFills.push(
+      `<rect class="panel-fill" data-panel-id="${panel.id}" x="${panel.x}" y="${panel.y}" width="${panel.width}" height="${panel.height}" />`,
+    );
+    rects.push(
+      `<rect class="panel-rect" data-panel-id="${panel.id}" x="${panel.x}" y="${panel.y}" width="${panel.width}" height="${panel.height}" fill="transparent" stroke="${strokeColor}" stroke-width="${pf.lineWidth}" />`,
+    );
+    if (!panel.image) {
+      const centerX = panel.x + panel.width / 2;
+      const centerY = panel.y + panel.height / 2;
+      const baseSize = Math.min(panel.width, panel.height);
+      const fontSize = Math.max(12, Math.min(24, baseSize * 0.18));
+      placeholders.push(
+        `<text class="panel-placeholder" data-panel-id="${panel.id}" x="${centerX}" y="${centerY}" text-anchor="middle" dominant-baseline="middle" font-size="${fontSize.toFixed(1)}">双击插入图片</text>`,
+      );
+    }
+  });
+  defs.push('</mask>');
+
+  const svgContent = [
+    `<defs>${defs.join('')}</defs>`,
+    `<rect class="panel-gutter-fill" x="${pf.x}" y="${pf.y}" width="${pf.width}" height="${pf.height}" fill="${gutterColor}" mask="url(#${maskId})" />`,
+    ...panelFills,
+    ...rects,
+    ...placeholders,
+  ];
+  elements.panelSvg.innerHTML = svgContent.join('');
+  renderPanelImages();
+}
+
+function renderPanelImages() {
+  if (!elements.panelImageLayer) return;
+  const container = elements.panelImageLayer;
+  container.innerHTML = '';
+  const pf = state.pageFrame;
+  if (!pf.active) return;
+  pf.panels.forEach((panel) => {
+    if (!panel.image) return;
+    const frame = document.createElement('div');
+    frame.className = 'panel-image-frame';
+    frame.dataset.panelId = String(panel.id);
+    frame.style.left = `${panel.x}px`;
+    frame.style.top = `${panel.y}px`;
+    frame.style.width = `${panel.width}px`;
+    frame.style.height = `${panel.height}px`;
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'panel-image';
+    wrapper.dataset.panelId = String(panel.id);
+    const img = document.createElement('img');
+    img.src = panel.image.src;
+    wrapper.appendChild(img);
+
+    const scale = panel.image.scale ?? 1;
+    const rotation = panel.image.rotation ?? 0;
+    const offsetX = panel.image.offsetX ?? 0;
+    const offsetY = panel.image.offsetY ?? 0;
+    const cx = panel.width / 2 + offsetX;
+    const cy = panel.height / 2 + offsetY;
+
+    wrapper.style.width = `${panel.image.width}px`;
+    wrapper.style.height = `${panel.image.height}px`;
+    wrapper.style.transform = `translate(${cx}px, ${cy}px) rotate(${rotation}deg) translate(-50%, -50%) scale(${scale})`;
+
+    frame.appendChild(wrapper);
+    container.appendChild(frame);
+  });
+}
+
+function updatePanelOverlay() {
+  const overlayRoot = elements.panelOverlay;
+  if (!overlayRoot) return;
+  const panel = getSelectedPanel();
+  if (!panel || !state.pageFrame.active) {
+    overlayRoot.classList.add('hidden');
+    return;
+  }
+  overlayRoot.classList.remove('hidden');
+  const topLeft = worldToScreen({ x: panel.x, y: panel.y });
+  const bottomRight = worldToScreen({ x: panel.x + panel.width, y: panel.y + panel.height });
+  panelOverlayState.box.style.left = `${topLeft.x}px`;
+  panelOverlayState.box.style.top = `${topLeft.y}px`;
+  panelOverlayState.box.style.width = `${bottomRight.x - topLeft.x}px`;
+  panelOverlayState.box.style.height = `${bottomRight.y - topLeft.y}px`;
+
+  HANDLE_DIRECTIONS.forEach((dir) => {
+    const handle = panelOverlayState.handles.get(dir);
+    if (!handle) return;
+    const position = computePanelHandlePosition(panel, dir);
+    const screenPos = worldToScreen(position);
+    handle.style.left = `${screenPos.x}px`;
+    handle.style.top = `${screenPos.y}px`;
+  });
+}
+
+function computePanelHandlePosition(panel, direction) {
+  const { x, y, width, height } = panel;
+  const positions = {
+    n: { x: x + width / 2, y },
+    s: { x: x + width / 2, y: y + height },
+    w: { x, y: y + height / 2 },
+    e: { x: x + width, y: y + height / 2 },
+    nw: { x, y },
+    ne: { x: x + width, y },
+    sw: { x, y: y + height },
+    se: { x: x + width, y: y + height },
+  };
+  return positions[direction] || { x: x + width / 2, y: y + height / 2 };
+}
+
+function handlePanelMarginChange() {
+  const pf = state.pageFrame;
+  const horizontal = Number(elements.panelMarginHorizontal.value) || 0;
+  const vertical = Number(elements.panelMarginVertical.value) || 0;
+  pf.horizontalMargin = Math.max(0, horizontal);
+  pf.verticalMargin = Math.max(0, vertical);
+  ensurePageFrameActive();
+  render();
+  updatePanelControlsFromState();
+}
+
+function handlePanelStyleChange() {
+  const pf = state.pageFrame;
+  pf.lineWidth = Math.max(1, Number(elements.panelLineWidth.value) || 1);
+  pf.horizontalGap = Math.max(0, Number(elements.panelGapHorizontal.value) || 0);
+  pf.verticalGap = Math.max(0, Number(elements.panelGapVertical.value) || 0);
+  pf.frameColor = elements.panelFrameColor.value === 'black' ? 'black' : 'white';
+  renderPanels();
+  updatePanelOverlay();
+  updatePanelControlsFromState();
+}
+
+function handlePanelRotationChange() {
+  const panel = getSelectedPanel();
+  if (!panel || !panel.image) return;
+  const value = Number(elements.panelImageRotation.value) || 0;
+  panel.image.rotation = clamp(value, -180, 180);
+  renderPanelImages();
+}
+
+function handlePanelPointerDown(event) {
+  if (!state.pageFrame.active) return;
+  const point = clientToWorldPoint(event);
+  const pf = state.pageFrame;
+  const frameRect = { x: pf.x, y: pf.y, width: pf.width, height: pf.height };
+  const isInsideFrame = isPointInRect(point, frameRect);
+
+  event.stopPropagation();
+
+  if (event.button === 2) {
+    const panel = findPanelAtPoint(point);
+    if (panel && panel.image) {
+      setSelectedPanel(panel.id);
+      state.panelInteraction = {
+        type: 'image-pan',
+        pointerId: event.pointerId,
+        panelId: panel.id,
+        startX: event.clientX,
+        startY: event.clientY,
+        imageStart: {
+          offsetX: panel.image.offsetX || 0,
+          offsetY: panel.image.offsetY || 0,
+        },
+      };
+      try {
+        elements.viewport.setPointerCapture(event.pointerId);
+      } catch (error) {
+        // ignore capture failures
+      }
+    }
+    return;
+  }
+
+  if (event.button !== 0) {
+    return;
+  }
+
+  if (!isInsideFrame) {
+    state.panelInteraction = {
+      type: 'drag-frame',
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      frameStart: { x: pf.x, y: pf.y },
+    };
+    try {
+      elements.viewport.setPointerCapture(event.pointerId);
+    } catch (error) {}
+    return;
+  }
+
+  const panel = findPanelAtPoint(point);
+  if (panel) {
+    setSelectedPanel(panel.id);
+    if (event.shiftKey) {
+      state.panelInteraction = {
+        type: 'move-panel',
+        pointerId: event.pointerId,
+        panelId: panel.id,
+        startX: event.clientX,
+        startY: event.clientY,
+        startRect: { x: panel.x, y: panel.y, width: panel.width, height: panel.height },
+      };
+    } else {
+      state.panelInteraction = {
+        type: 'split',
+        pointerId: event.pointerId,
+        panelId: panel.id,
+        startPoint: point,
+        lastPoint: point,
+        orientation: null,
+      };
+    }
+  } else {
+    setSelectedPanel(null);
+  }
+
+  if (state.panelInteraction) {
+    try {
+      elements.viewport.setPointerCapture(event.pointerId);
+    } catch (error) {}
+  }
+}
+
+function handlePanelDoubleClick(event) {
+  if (!state.pageFrame.active || event.button !== 0) return;
+  event.stopPropagation();
+  const point = clientToWorldPoint(event);
+  const panel = findPanelAtPoint(point);
+  if (!panel) return;
+  setSelectedPanel(panel.id);
+  state.panelImageTargetId = panel.id;
+  if (elements.hiddenPanelImageInput) {
+    elements.hiddenPanelImageInput.value = '';
+    elements.hiddenPanelImageInput.click();
+  }
+}
+
+function handlePanelWheel(event) {
+  if (!state.pageFrame.active) return;
+  const point = clientToWorldPoint(event);
+  const panel = findPanelAtPoint(point);
+  if (!panel || !panel.image) return;
+  if (event.ctrlKey) return;
+  event.stopPropagation();
+  event.preventDefault();
+  const delta = event.deltaY < 0 ? 0.08 : -0.08;
+  const newScale = clamp((panel.image.scale || 1) + delta, 0.1, 8);
+  panel.image.scale = newScale;
+  renderPanelImages();
+}
+
+function handlePanelImageSelection(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file || !state.panelImageTargetId) return;
+  const panelId = state.panelImageTargetId;
+  state.panelImageTargetId = null;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const panel = state.pageFrame.panels.find((item) => item.id === panelId);
+    if (!panel) return;
+    const src = typeof reader.result === 'string' ? reader.result : '';
+    if (!src) return;
+    const img = new Image();
+    img.onload = () => {
+      panel.image = {
+        src,
+        width: img.naturalWidth,
+        height: img.naturalHeight,
+        scale: Math.min(
+          panel.width / img.naturalWidth,
+          panel.height / img.naturalHeight,
+        ) || 1,
+        rotation: 0,
+        offsetX: 0,
+        offsetY: 0,
+      };
+      renderPanels();
+      updatePanelControlsFromState();
+    };
+    img.src = src;
+  };
+  reader.readAsDataURL(file);
+}
+
+function startPanelResize(event, direction) {
+  event.stopPropagation();
+  const panel = getSelectedPanel();
+  if (!panel) return;
+  state.panelInteraction = {
+    type: 'resize-panel',
+    pointerId: event.pointerId,
+    panelId: panel.id,
+    direction,
+    startX: event.clientX,
+    startY: event.clientY,
+    startRect: { x: panel.x, y: panel.y, width: panel.width, height: panel.height },
+  };
+  try {
+    elements.viewport.setPointerCapture(event.pointerId);
+  } catch (error) {}
+}
+
+function findPanelAtPoint(point) {
+  const pf = state.pageFrame;
+  if (!pf.active) return null;
+  for (let i = 0; i < pf.panels.length; i += 1) {
+    const panel = pf.panels[i];
+    if (isPointInRect(point, panel)) {
+      return panel;
+    }
+  }
+  return null;
+}
+
+function handlePanelInteractionMove(event) {
+  const interaction = state.panelInteraction;
+  if (!interaction) return;
+  const pf = state.pageFrame;
+  if (!pf.active) return;
+  if (interaction.type === 'drag-frame') {
+    const delta = screenDeltaToWorld(
+      event.clientX - interaction.startX,
+      event.clientY - interaction.startY,
+    );
+    const maxX = Math.max(0, state.image.width - pf.width);
+    const maxY = Math.max(0, state.image.height - pf.height);
+    pf.x = clamp(interaction.frameStart.x + delta.x, 0, maxX);
+    pf.y = clamp(interaction.frameStart.y + delta.y, 0, maxY);
+    pf.horizontalMargin = pf.x;
+    pf.verticalMargin = pf.y;
+    renderPanels();
+    updatePanelControlsFromState();
+    updatePanelOverlay();
+    return;
+  }
+  if (interaction.type === 'move-panel') {
+    const panel = pf.panels.find((item) => item.id === interaction.panelId);
+    if (!panel) return;
+    const delta = screenDeltaToWorld(
+      event.clientX - interaction.startX,
+      event.clientY - interaction.startY,
+    );
+    movePanelWithinFrame(panel, interaction.startRect, delta);
+    renderPanels();
+    updatePanelOverlay();
+    return;
+  }
+  if (interaction.type === 'resize-panel') {
+    const panel = pf.panels.find((item) => item.id === interaction.panelId);
+    if (!panel) return;
+    const delta = screenDeltaToWorld(
+      event.clientX - interaction.startX,
+      event.clientY - interaction.startY,
+    );
+    applyPanelResize(panel, interaction.startRect, interaction.direction, delta);
+    renderPanels();
+    updatePanelOverlay();
+    return;
+  }
+  if (interaction.type === 'split') {
+    const panel = pf.panels.find((item) => item.id === interaction.panelId);
+    if (!panel) return;
+    const point = clientToWorldPoint(event);
+    interaction.lastPoint = point;
+    if (!interaction.orientation) {
+      const dx = point.x - interaction.startPoint.x;
+      const dy = point.y - interaction.startPoint.y;
+      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
+        interaction.orientation = Math.abs(dx) >= Math.abs(dy) ? 'vertical' : 'horizontal';
+      }
+    }
+    return;
+  }
+  if (interaction.type === 'image-pan') {
+    const panel = pf.panels.find((item) => item.id === interaction.panelId);
+    if (!panel || !panel.image) return;
+    const delta = screenDeltaToWorld(
+      event.clientX - interaction.startX,
+      event.clientY - interaction.startY,
+    );
+    panel.image.offsetX = interaction.imageStart.offsetX + delta.x;
+    panel.image.offsetY = interaction.imageStart.offsetY + delta.y;
+    renderPanelImages();
+  }
+}
+
+function finalizePanelInteraction(event) {
+  const interaction = state.panelInteraction;
+  if (!interaction || interaction.pointerId !== event.pointerId) return false;
+  const pf = state.pageFrame;
+  state.panelInteraction = null;
+  try {
+    elements.viewport.releasePointerCapture(event.pointerId);
+  } catch (error) {}
+
+  let changed = false;
+  if (interaction.type === 'split') {
+    if (interaction.orientation) {
+      const panel = pf.panels.find((item) => item.id === interaction.panelId);
+      if (panel) {
+        const success = performPanelSplit(panel, interaction.orientation, interaction.lastPoint || interaction.startPoint);
+        if (success) {
+          renderPanels();
+          updatePanelControlsFromState();
+          updatePanelOverlay();
+          changed = true;
+        }
+      }
+    }
+    return changed;
+  }
+  if (interaction.type === 'drag-frame') {
+    changed =
+      Math.abs(pf.x - interaction.frameStart.x) > 0.5 ||
+      Math.abs(pf.y - interaction.frameStart.y) > 0.5;
+    if (changed) {
+      updatePanelControlsFromState();
+    }
+    return changed;
+  }
+  if (interaction.type === 'move-panel') {
+    const panel = pf.panels.find((item) => item.id === interaction.panelId);
+    if (!panel) return false;
+    changed =
+      Math.abs(panel.x - interaction.startRect.x) > 0.5 ||
+      Math.abs(panel.y - interaction.startRect.y) > 0.5;
+    return changed;
+  }
+  if (interaction.type === 'resize-panel') {
+    const panel = pf.panels.find((item) => item.id === interaction.panelId);
+    if (!panel) return false;
+    changed =
+      Math.abs(panel.x - interaction.startRect.x) > 0.5 ||
+      Math.abs(panel.y - interaction.startRect.y) > 0.5 ||
+      Math.abs(panel.width - interaction.startRect.width) > 0.5 ||
+      Math.abs(panel.height - interaction.startRect.height) > 0.5;
+    return changed;
+  }
+  if (interaction.type === 'image-pan') {
+    const panel = pf.panels.find((item) => item.id === interaction.panelId);
+    if (!panel || !panel.image) return false;
+    changed =
+      Math.abs(panel.image.offsetX - interaction.imageStart.offsetX) > 0.5 ||
+      Math.abs(panel.image.offsetY - interaction.imageStart.offsetY) > 0.5;
+    return changed;
+  }
+  return false;
+}
+
+function isPointInRect(point, rect) {
+  return (
+    point.x >= rect.x &&
+    point.y >= rect.y &&
+    point.x <= rect.x + rect.width &&
+    point.y <= rect.y + rect.height
+  );
+}
+
+function movePanelWithinFrame(panel, startRect, delta) {
+  const pf = state.pageFrame;
+  const frame = { x: pf.x, y: pf.y, width: pf.width, height: pf.height };
+  let nextX = startRect.x + delta.x;
+  let nextY = startRect.y + delta.y;
+  const minX = frame.x;
+  const maxX = frame.x + frame.width - startRect.width;
+  const minY = frame.y;
+  const maxY = frame.y + frame.height - startRect.height;
+  nextX = clamp(nextX, minX, maxX);
+  nextY = clamp(nextY, minY, maxY);
+  panel.x = nextX;
+  panel.y = nextY;
+}
+
+function applyPanelResize(panel, startRect, direction, delta) {
+  const pf = state.pageFrame;
+  let { x, y, width, height } = startRect;
+  if (direction.includes('w')) {
+    const min = Math.max(pf.x, x + width - PANEL_MIN_SIZE);
+    const nextX = clamp(x + delta.x, pf.x, min);
+    width = width - (nextX - x);
+    x = nextX;
+  }
+  if (direction.includes('e')) {
+    const max = pf.x + pf.width;
+    const next = clamp(x + width + delta.x, x + PANEL_MIN_SIZE, max);
+    width = next - x;
+  }
+  if (direction.includes('n')) {
+    const min = Math.max(pf.y, y + height - PANEL_MIN_SIZE);
+    const nextY = clamp(y + delta.y, pf.y, min);
+    height = height - (nextY - y);
+    y = nextY;
+  }
+  if (direction.includes('s')) {
+    const max = pf.y + pf.height;
+    const next = clamp(y + height + delta.y, y + PANEL_MIN_SIZE, max);
+    height = next - y;
+  }
+  panel.x = x;
+  panel.y = y;
+  panel.width = Math.max(PANEL_MIN_SIZE, width);
+  panel.height = Math.max(PANEL_MIN_SIZE, height);
+  if (panel.image) {
+    panel.image.offsetX = 0;
+    panel.image.offsetY = 0;
+    panel.image.scale = Math.min(
+      panel.width / panel.image.width,
+      panel.height / panel.image.height,
+    ) || panel.image.scale || 1;
+  }
+}
+
+function performPanelSplit(panel, orientation, splitPoint) {
+  const pf = state.pageFrame;
+  const panels = pf.panels;
+  const index = panels.findIndex((item) => item.id === panel.id);
+  if (index === -1) return false;
+  if (orientation === 'vertical') {
+    const gap = pf.horizontalGap;
+    const available = panel.width - gap;
+    if (available <= PANEL_MIN_SIZE * 2) return false;
+    let cutRatio = (splitPoint.x - panel.x) / panel.width;
+    cutRatio = clamp(cutRatio, 0.1, 0.9);
+    let leftWidth = clamp(available * cutRatio, PANEL_MIN_SIZE, available - PANEL_MIN_SIZE);
+    let rightWidth = available - leftWidth;
+    const leftPanel = {
+      ...panel,
+      width: leftWidth,
+      image: null,
+    };
+    const rightPanel = createPanel(panel.x + leftWidth + gap, panel.y, rightWidth, panel.height);
+    panels.splice(index, 1, leftPanel, rightPanel);
+    const target = findPanelAtPoint(splitPoint);
+    setSelectedPanel(target ? target.id : rightPanel.id);
+    return true;
+  }
+  if (orientation === 'horizontal') {
+    const gap = pf.verticalGap;
+    const available = panel.height - gap;
+    if (available <= PANEL_MIN_SIZE * 2) return false;
+    let cutRatio = (splitPoint.y - panel.y) / panel.height;
+    cutRatio = clamp(cutRatio, 0.1, 0.9);
+    let topHeight = clamp(available * cutRatio, PANEL_MIN_SIZE, available - PANEL_MIN_SIZE);
+    let bottomHeight = available - topHeight;
+    const topPanel = {
+      ...panel,
+      height: topHeight,
+      image: null,
+    };
+    const bottomPanel = createPanel(panel.x, panel.y + topHeight + gap, panel.width, bottomHeight);
+    panels.splice(index, 1, topPanel, bottomPanel);
+    const target = findPanelAtPoint(splitPoint);
+    setSelectedPanel(target ? target.id : bottomPanel.id);
+    return true;
+  }
+  return false;
 }
 
 function renderBubbles() {
@@ -2058,6 +2908,7 @@ function pushHistory() {
     bubbles: state.bubbles,
     selectedBubbleId: state.selectedBubbleId,
     viewport: state.viewport,
+    pageFrame: clonePageFrame(state.pageFrame),
   });
   state.history = state.history.slice(0, state.historyIndex + 1);
   state.history.push(snapshot);
@@ -2071,9 +2922,11 @@ function undo() {
   state.bubbles = snapshot.bubbles.map((bubble) => ({ ...bubble }));
   state.selectedBubbleId = snapshot.selectedBubbleId;
   state.viewport = { ...snapshot.viewport };
+  restorePageFrame(snapshot.pageFrame);
   updateSceneTransform();
   render();
   updateControlsFromSelection();
+  updatePanelControlsFromState();
 }
 
 function clamp(value, min, max) {
