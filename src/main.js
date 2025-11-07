@@ -247,6 +247,7 @@ function attachEvents() {
 
   elements.viewport?.addEventListener('wheel', handleWheel, { passive: false });
   elements.viewport?.addEventListener('pointerdown', handleViewportPointerDown);
+  elements.viewport?.addEventListener('dblclick', handleViewportDoubleClick);
   window.addEventListener('pointermove', handlePointerMove);
   window.addEventListener('pointerup', handlePointerUp);
 
@@ -1718,6 +1719,9 @@ function renderPanelImages() {
     frame.style.top = `${panel.y}px`;
     frame.style.width = `${panel.width}px`;
     frame.style.height = `${panel.height}px`;
+    frame.style.position = 'absolute';
+    frame.style.overflow = 'hidden';
+    frame.style.pointerEvents = 'none';
 
     // 内层 wrapper 放图片，并在 frame 坐标系里做位移/旋转/缩放
     const wrapper = document.createElement('div');
