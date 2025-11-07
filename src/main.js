@@ -247,6 +247,7 @@ function attachEvents() {
 
   elements.viewport?.addEventListener('wheel', handleWheel, { passive: false });
   elements.viewport?.addEventListener('pointerdown', handleViewportPointerDown);
+  elements.viewport?.addEventListener('dblclick', handleViewportDoubleClick);
   window.addEventListener('pointermove', handlePointerMove);
   window.addEventListener('pointerup', handlePointerUp);
 
@@ -288,6 +289,12 @@ function handleViewportDoubleClick(event) {
     if (elements.panelImageLayer && elements.panelImageLayer.contains(target)) return;
     // 保险：命中任一带 data-panel-id 的元素也退出
     if (target.closest('[data-panel-id]')) return;
+  }
+  if (state.pageFrame?.active) {
+    const point = clientToWorldPoint(event);
+    if (findPanelAtPoint(point)) {
+      return;
+    }
   }
   if (target instanceof Element && target.closest('[data-bubble-id]')) {
     return;
@@ -1718,11 +1725,15 @@ function renderPanelImages() {
     frame.style.top = `${panel.y}px`;
     frame.style.width = `${panel.width}px`;
     frame.style.height = `${panel.height}px`;
+    frame.style.position = 'absolute';
+    frame.style.overflow = 'hidden';
+    frame.style.pointerEvents = 'auto';
 
     // 内层 wrapper 放图片，并在 frame 坐标系里做位移/旋转/缩放
     const wrapper = document.createElement('div');
     wrapper.className = 'panel-image';
     wrapper.dataset.panelId = String(panel.id);
+    wrapper.style.pointerEvents = 'auto';
     const img = document.createElement('img');
     img.src = panel.image.src;
     wrapper.appendChild(img);
@@ -1904,8 +1915,21 @@ function handlePanelDoubleClick(event) {
   event.preventDefault();
   if (event.button !== 0) return;
 
-  const point = clientToWorldPoint(event);
-  const panel = findPanelAtPoint(point);
+  let panel = null;
+  if (event.target instanceof Element) {
+    const elementWithId = event.target.closest('[data-panel-id]');
+    if (elementWithId) {
+      const id = Number(elementWithId.getAttribute('data-panel-id'));
+      if (!Number.isNaN(id)) {
+        panel = state.pageFrame.panels.find((item) => item.id === id) || null;
+      }
+    }
+  }
+
+  if (!panel) {
+    const point = clientToWorldPoint(event);
+    panel = findPanelAtPoint(point);
+  }
   if (!panel) return;
   setSelectedPanel(panel.id);
   state.panelImageTargetId = panel.id;
