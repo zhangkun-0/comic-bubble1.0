@@ -1680,9 +1680,6 @@ function renderPanels() {
   const svgContent = [
     `<defs>${defs.join('')}</defs>`,
     `<rect class="panel-gutter-fill" x="${pf.x}" y="${pf.y}" width="${pf.width}" height="${pf.height}" fill="${gutterColor}" mask="url(#${maskId})" />`,
-   const svgContent = [
-     `<defs>${defs.join('')}</defs>`,
-     `<rect class="panel-gutter-fill" x="${pf.x}" y="${pf.y}" width="${pf.width}" height="${pf.height}" fill="${gutterColor}" mask="url(#${maskId})" />`,
      ...panelFills,
      ...rects,
      ...placeholders,
