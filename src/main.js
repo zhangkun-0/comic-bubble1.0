@@ -1727,12 +1727,13 @@ function renderPanelImages() {
     frame.style.height = `${panel.height}px`;
     frame.style.position = 'absolute';
     frame.style.overflow = 'hidden';
-    frame.style.pointerEvents = 'none';
+    frame.style.pointerEvents = 'auto';
 
     // 内层 wrapper 放图片，并在 frame 坐标系里做位移/旋转/缩放
     const wrapper = document.createElement('div');
     wrapper.className = 'panel-image';
     wrapper.dataset.panelId = String(panel.id);
+    wrapper.style.pointerEvents = 'auto';
     const img = document.createElement('img');
     img.src = panel.image.src;
     wrapper.appendChild(img);
@@ -1914,8 +1915,21 @@ function handlePanelDoubleClick(event) {
   event.preventDefault();
   if (event.button !== 0) return;
 
-  const point = clientToWorldPoint(event);
-  const panel = findPanelAtPoint(point);
+  let panel = null;
+  if (event.target instanceof Element) {
+    const elementWithId = event.target.closest('[data-panel-id]');
+    if (elementWithId) {
+      const id = Number(elementWithId.getAttribute('data-panel-id'));
+      if (!Number.isNaN(id)) {
+        panel = state.pageFrame.panels.find((item) => item.id === id) || null;
+      }
+    }
+  }
+
+  if (!panel) {
+    const point = clientToWorldPoint(event);
+    panel = findPanelAtPoint(point);
+  }
   if (!panel) return;
   setSelectedPanel(panel.id);
   state.panelImageTargetId = panel.id;
