@@ -233,40 +233,45 @@ function setupPanelOverlay() {
 }
 
 function attachEvents() {
-  elements.importButton.addEventListener('click', handleImportButtonClick);
-  elements.hiddenImageInput.addEventListener('change', handleImageSelection);
-  elements.insertBubble.addEventListener('click', insertBubbleFromControls);
-  elements.removeBubble.addEventListener('click', removeSelectedBubble);
-  elements.strokeWidth.addEventListener('change', handleStrokeChange);
-  elements.fontFamily.addEventListener('change', handleFontFamilyChange);
-  elements.fontSize.addEventListener('change', handleFontSizeChange);
-  elements.toggleBold.addEventListener('click', toggleBold);
-  elements.textContent.addEventListener('input', handleTextInput);
-  elements.undo.addEventListener('click', undo);
-  elements.exportButton.addEventListener('click', pro5_exportPNG);
+  elements.importButton?.addEventListener('click', handleImportButtonClick);
+  elements.hiddenImageInput?.addEventListener('change', handleImageSelection);
+  elements.insertBubble?.addEventListener('click', insertBubbleFromControls);
+  elements.removeBubble?.addEventListener('click', removeSelectedBubble);
+  elements.strokeWidth?.addEventListener('change', handleStrokeChange);
+  elements.fontFamily?.addEventListener('change', handleFontFamilyChange);
+  elements.fontSize?.addEventListener('change', handleFontSizeChange);
+  elements.toggleBold?.addEventListener('click', toggleBold);
+  elements.textContent?.addEventListener('input', handleTextInput);
+  elements.undo?.addEventListener('click', undo);
+  elements.exportButton?.addEventListener('click', pro5_exportPNG);
 
-  elements.viewport.addEventListener('wheel', handleWheel, { passive: false });
-  elements.viewport.addEventListener('pointerdown', handleViewportPointerDown);
-  elements.viewport.addEventListener('dblclick', handleViewportDoubleClick);
+  elements.viewport?.addEventListener('wheel', handleWheel, { passive: false });
+  elements.viewport?.addEventListener('pointerdown', handleViewportPointerDown);
   window.addEventListener('pointermove', handlePointerMove);
   window.addEventListener('pointerup', handlePointerUp);
 
-  elements.bubbleLayer.addEventListener('pointerdown', handleBubblePointerDown);
-  elements.bubbleLayer.addEventListener('dblclick', handleBubbleDoubleClick);
+  elements.bubbleLayer?.addEventListener('pointerdown', handleBubblePointerDown);
+  elements.bubbleLayer?.addEventListener('dblclick', handleBubbleDoubleClick);
 
-  elements.panelLayer.addEventListener('pointerdown', handlePanelPointerDown);
-  elements.panelLayer.addEventListener('wheel', handlePanelWheel, { passive: false });
-  elements.panelLayer.addEventListener('contextmenu', (event) => event.preventDefault());
-  elements.panelLayer.addEventListener('dblclick', handlePanelDoubleClick);
-  elements.hiddenPanelImageInput.addEventListener('change', handlePanelImageSelection);
-
-  elements.panelMarginHorizontal.addEventListener('change', handlePanelMarginChange);
-  elements.panelMarginVertical.addEventListener('change', handlePanelMarginChange);
-  elements.panelLineWidth.addEventListener('change', handlePanelStyleChange);
-  elements.panelGapHorizontal.addEventListener('change', handlePanelStyleChange);
-  elements.panelGapVertical.addEventListener('change', handlePanelStyleChange);
-  elements.panelFrameColor.addEventListener('change', handlePanelStyleChange);
-  elements.panelImageRotation.addEventListener('input', handlePanelRotationChange);
+  elements.panelLayer?.addEventListener('pointerdown', handlePanelPointerDown);
+  elements.panelLayer?.addEventListener('wheel', handlePanelWheel, { passive: false });
+  elements.panelLayer?.addEventListener('contextmenu', (event) => event.preventDefault());
+  elements.panelLayer?.addEventListener('dblclick', handlePanelDoubleClick);
+  elements.hiddenPanelImageInput?.addEventListener('change', handlePanelImageSelection);
+  // === 面板图片层：图片元素有 pointer-events:auto，事件需要在该层也监听 ===
+  if (elements.panelImageLayer) {
+    elements.panelImageLayer?.addEventListener('pointerdown', handlePanelPointerDown);
+    elements.panelImageLayer?.addEventListener('wheel', handlePanelWheel, { passive: false });
+    elements.panelImageLayer?.addEventListener('contextmenu', (event) => event.preventDefault());
+    elements.panelImageLayer?.addEventListener('dblclick', handlePanelDoubleClick);
+  }
+  elements.panelMarginHorizontal?.addEventListener('change', handlePanelMarginChange);
+  elements.panelMarginVertical?.addEventListener('change', handlePanelMarginChange);
+  elements.panelLineWidth?.addEventListener('change', handlePanelStyleChange);
+  elements.panelGapHorizontal?.addEventListener('change', handlePanelStyleChange);
+  elements.panelGapVertical?.addEventListener('change', handlePanelStyleChange);
+  elements.panelFrameColor?.addEventListener('change', handlePanelStyleChange);
+  elements.panelImageRotation?.addEventListener('input', handlePanelRotationChange);
 
   document.addEventListener('keydown', handleKeyDown);
 }
@@ -277,6 +282,13 @@ function handleImportButtonClick() {
 
 function handleViewportDoubleClick(event) {
   const target = event.target;
+    // 如果双击发生在分镜层或分镜图片层内，直接退出，避免和“面板插图”混淆
+  if (target instanceof Element) {
+    if (elements.panelLayer && elements.panelLayer.contains(target)) return;
+    if (elements.panelImageLayer && elements.panelImageLayer.contains(target)) return;
+    // 保险：命中任一带 data-panel-id 的元素也退出
+    if (target.closest('[data-panel-id]')) return;
+  }
   if (target instanceof Element && target.closest('[data-bubble-id]')) {
     return;
   }
@@ -1698,6 +1710,16 @@ function renderPanelImages() {
   if (!pf.active) return;
   pf.panels.forEach((panel) => {
     if (!panel.image) return;
+   // 新增：外层 frame 负责裁剪（溢出隐藏），定位在 panel 处
+    const frame = document.createElement('div');
+    frame.className = 'panel-image-frame';
+    frame.dataset.panelId = String(panel.id);
+    frame.style.left = `${panel.x}px`;
+    frame.style.top = `${panel.y}px`;
+    frame.style.width = `${panel.width}px`;
+    frame.style.height = `${panel.height}px`;
+
+    // 内层 wrapper 放图片，并在 frame 坐标系里做位移/旋转/缩放
     const wrapper = document.createElement('div');
     wrapper.className = 'panel-image';
     wrapper.dataset.panelId = String(panel.id);
@@ -1709,14 +1731,15 @@ function renderPanelImages() {
     const rotation = panel.image.rotation ?? 0;
     const offsetX = panel.image.offsetX ?? 0;
     const offsetY = panel.image.offsetY ?? 0;
-    const cx = panel.x + panel.width / 2 + offsetX;
-    const cy = panel.y + panel.height / 2 + offsetY;
-    
+    const cx = panel.width / 2 + offsetX;
+    const cy = panel.height / 2 + offsetY;
     wrapper.style.width = `${panel.image.width}px`;
     wrapper.style.height = `${panel.image.height}px`;
     wrapper.style.transform = `translate(${cx}px, ${cy}px) rotate(${rotation}deg) translate(-50%, -50%) scale(${scale})`;
 
-    container.appendChild(wrapper);
+    frame.appendChild(wrapper);
+    container.appendChild(frame);  
+
   });
 }
 
@@ -1876,8 +1899,11 @@ function handlePanelPointerDown(event) {
 }
 
 function handlePanelDoubleClick(event) {
-  if (!state.pageFrame.active || event.button !== 0) return;
+  // 先拦截，防止冒泡到 viewport 触发全局导入
   event.stopPropagation();
+  event.preventDefault();
+  if (event.button !== 0) return;
+
   const point = clientToWorldPoint(event);
   const panel = findPanelAtPoint(point);
   if (!panel) return;
