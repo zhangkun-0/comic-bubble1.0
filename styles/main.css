@@ -410,8 +410,9 @@ button[data-active='true'] {
   pointer-events: none;
 }
 
-#panel-layer .panel-frame-fill {
+#panel-layer .panel-fill {
   fill: rgba(111, 78, 55, 0.3);
+  pointer-events: none;
 }
 
 #panel-layer .panel-gutter-fill {
@@ -422,6 +423,15 @@ button[data-active='true'] {
   fill: rgba(17, 20, 27, 0.01);
   stroke: #10131c;
   vector-effect: non-scaling-stroke;
+}
+
+#panel-layer .panel-placeholder {
+  fill: rgba(136, 140, 150, 0.85);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  font-family: 'Microsoft YaHei', '微软雅黑', sans-serif;
+  pointer-events: none;
+  user-select: none;
 }
 
 #panel-image-layer {
