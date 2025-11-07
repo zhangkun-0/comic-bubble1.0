@@ -290,6 +290,12 @@ function handleViewportDoubleClick(event) {
     // 保险：命中任一带 data-panel-id 的元素也退出
     if (target.closest('[data-panel-id]')) return;
   }
+  if (state.pageFrame?.active) {
+    const point = clientToWorldPoint(event);
+    if (findPanelAtPoint(point)) {
+      return;
+    }
+  }
   if (target instanceof Element && target.closest('[data-bubble-id]')) {
     return;
   }
