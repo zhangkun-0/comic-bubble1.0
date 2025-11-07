@@ -1629,6 +1629,9 @@ function restorePageFrame(snapshot) {
 }
 
 function renderPanels() {
+    // 守护式检查
+  if (!elements || !elements.panelLayer || !elements.panelSvg || !elements.panelImageLayer) return;
+  
   const pf = state.pageFrame;
   if (!pf.active || !state.image.width || !state.image.height) {
     elements.panelLayer?.setAttribute('data-active', 'false');
@@ -1677,30 +1680,27 @@ function renderPanels() {
   const svgContent = [
     `<defs>${defs.join('')}</defs>`,
     `<rect class="panel-gutter-fill" x="${pf.x}" y="${pf.y}" width="${pf.width}" height="${pf.height}" fill="${gutterColor}" mask="url(#${maskId})" />`,
-    ...panelFills,
-    ...rects,
-    ...placeholders,
-  ];
-  elements.panelSvg.innerHTML = svgContent.join('');
-  renderPanelImages();
-}
+   const svgContent = [
+     `<defs>${defs.join('')}</defs>`,
+     `<rect class="panel-gutter-fill" x="${pf.x}" y="${pf.y}" width="${pf.width}" height="${pf.height}" fill="${gutterColor}" mask="url(#${maskId})" />`,
+     ...panelFills,
+     ...rects,
+     ...placeholders,
+   ];
+   elements.panelSvg.innerHTML = svgContent.join('');
+   renderPanelImages();
+ }
 
 function renderPanelImages() {
-  if (!elements.panelImageLayer) return;
+     // 守护式检查
+  if (!elements || !elements.panelImageLayer) return;
+  
   const container = elements.panelImageLayer;
   container.innerHTML = '';
   const pf = state.pageFrame;
   if (!pf.active) return;
   pf.panels.forEach((panel) => {
     if (!panel.image) return;
-    const frame = document.createElement('div');
-    frame.className = 'panel-image-frame';
-    frame.dataset.panelId = String(panel.id);
-    frame.style.left = `${panel.x}px`;
-    frame.style.top = `${panel.y}px`;
-    frame.style.width = `${panel.width}px`;
-    frame.style.height = `${panel.height}px`;
-
     const wrapper = document.createElement('div');
     wrapper.className = 'panel-image';
     wrapper.dataset.panelId = String(panel.id);
@@ -1712,15 +1712,14 @@ function renderPanelImages() {
     const rotation = panel.image.rotation ?? 0;
     const offsetX = panel.image.offsetX ?? 0;
     const offsetY = panel.image.offsetY ?? 0;
-    const cx = panel.width / 2 + offsetX;
-    const cy = panel.height / 2 + offsetY;
-
+    const cx = panel.x + panel.width / 2 + offsetX;
+    const cy = panel.y + panel.height / 2 + offsetY;
+    
     wrapper.style.width = `${panel.image.width}px`;
     wrapper.style.height = `${panel.image.height}px`;
     wrapper.style.transform = `translate(${cx}px, ${cy}px) rotate(${rotation}deg) translate(-50%, -50%) scale(${scale})`;
 
-    frame.appendChild(wrapper);
-    container.appendChild(frame);
+    container.appendChild(wrapper);
   });
 }
 
@@ -1933,7 +1932,10 @@ function handlePanelImageSelection(event) {
         offsetX: 0,
         offsetY: 0,
       };
+      // 守护式检查（可选）：如果你还没加过，可以先确保元素存在
+      // if (elements && elements.panelSvg && elements.panelImageLayer) {
       renderPanels();
+      // }
       updatePanelControlsFromState();
     };
     img.src = src;
