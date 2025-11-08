@@ -2018,7 +2018,7 @@ function pastePanelFromClipboard() {
   const pf = state.pageFrame;
   if (!clipboard || !pf.active) return false;
 
-  const offset = 20;
+  const offset = 60;
   const maxX = pf.x + Math.max(0, pf.width - clipboard.width);
   const maxY = pf.y + Math.max(0, pf.height - clipboard.height);
   const nextX = clamp(clipboard.x + offset, pf.x, maxX);
