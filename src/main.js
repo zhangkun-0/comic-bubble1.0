@@ -2251,7 +2251,7 @@ function renderPanels() {
  }
 
 function renderPanelImages() {
-     // 守护式检查
+  // 守护式检查
   if (!elements || !elements.panelImageLayer) return;
   
   const container = elements.panelImageLayer;
@@ -2260,7 +2260,7 @@ function renderPanelImages() {
   if (!pf.active) return;
   pf.panels.forEach((panel) => {
     if (!panel.image) return;
-   // 新增：外层 frame 负责裁剪（溢出隐藏），定位在 panel 处
+    // 外层 frame 负责裁剪（溢出隐藏），定位在 panel 处
     const frame = document.createElement('div');
     frame.className = 'panel-image-frame';
     frame.dataset.panelId = String(panel.id);
@@ -2272,11 +2272,16 @@ function renderPanelImages() {
     frame.style.overflow = 'hidden';
     frame.style.pointerEvents = 'auto';
 
-    // 内层 wrapper 放图片，并在 frame 坐标系里做位移/旋转/缩放
     const wrapper = document.createElement('div');
     wrapper.className = 'panel-image';
     wrapper.dataset.panelId = String(panel.id);
+    wrapper.style.position = 'absolute';
+    wrapper.style.left = '0';
+    wrapper.style.top = '0';
+    wrapper.style.width = `${panel.image.width}px`;
+    wrapper.style.height = `${panel.image.height}px`;
     wrapper.style.pointerEvents = 'auto';
+    wrapper.style.transformOrigin = '0 0';
     const img = document.createElement('img');
     img.src = panel.image.src;
     img.draggable = false;
@@ -2287,14 +2292,32 @@ function renderPanelImages() {
     const rotation = panel.image.rotation ?? 0;
     const offsetX = panel.image.offsetX ?? 0;
     const offsetY = panel.image.offsetY ?? 0;
+    const radians = (rotation * Math.PI) / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    const a = scale * cos;
+    const b = scale * sin;
+    const c = -scale * sin;
+    const d = scale * cos;
+    const w = panel.image.width;
+    const h = panel.image.height;
     const cx = panel.width / 2 + offsetX;
     const cy = panel.height / 2 + offsetY;
-    wrapper.style.width = `${panel.image.width}px`;
-    wrapper.style.height = `${panel.image.height}px`;
-    wrapper.style.transform = `translate(${cx}px, ${cy}px) rotate(${rotation}deg) translate(-50%, -50%) scale(${scale})`;
+    const e = cx - (a * w) / 2 + (b * h) / 2;
+    const f = cy - (b * w) / 2 - (d * h) / 2;
+    wrapper.style.transform = `matrix(${a}, ${b}, ${c}, ${d}, ${e}, ${f})`;
 
+    const img = document.createElement('img');
+    img.src = panel.image.src;
+    img.draggable = false;
+    img.addEventListener('dragstart', (event) => event.preventDefault());
+    img.style.width = '100%';
+    img.style.height = '100%';
+    img.style.pointerEvents = 'none';
+
+    wrapper.appendChild(img);
     frame.appendChild(wrapper);
-    container.appendChild(frame);  
+    container.appendChild(frame);
 
   });
 }
@@ -2778,14 +2801,6 @@ function applyPanelResize(panel, startRect, direction, delta) {
   panel.y = y;
   panel.width = Math.max(PANEL_MIN_SIZE, width);
   panel.height = Math.max(PANEL_MIN_SIZE, height);
-  if (panel.image) {
-    panel.image.offsetX = 0;
-    panel.image.offsetY = 0;
-    panel.image.scale = Math.min(
-      panel.width / panel.image.width,
-      panel.height / panel.image.height,
-    ) || panel.image.scale || 1;
-  }
 }
 
 function performPanelSplit(panel, orientation, splitPoint) {
@@ -2934,11 +2949,16 @@ function renderBubbles() {
   if (defs.childNodes.length) {
     layer.appendChild(defs);
   }
+    groups.push(group);
+  });
+
+  if (defs.childNodes.length) {
+    layer.appendChild(defs);
+  }
 
   groups.forEach((group) => {
     layer.appendChild(group);
   });
-
     // pro5_: 组合框与其他圆形气泡的交界改为白色（缝合线）
   pro5_drawComboSeams();
   pro5_drawRectSeams();
