@@ -2026,7 +2026,7 @@ function pastePanelFromClipboard() {
   const pf = state.pageFrame;
   if (!clipboard || !pf.active) return false;
 
-  const offset = 20;
+  const offset = 60;
   const maxX = pf.x + Math.max(0, pf.width - clipboard.width);
   const maxY = pf.y + Math.max(0, pf.height - clipboard.height);
   const nextX = clamp(clipboard.x + offset, pf.x, maxX);
@@ -2038,10 +2038,10 @@ function pastePanelFromClipboard() {
   }
 
   pf.panels.push(newPanel);
-  render();
-  setSelectedPanel(newPanel.id);
-  pushHistory();
-  return true;
+   (typeof renderPanels === 'function' ? renderPanels : render)();
+   setSelectedPanel(newPanel.id);
+   pushHistory();
+   return true;
 }
 
 function deleteSelectedPanel() {
@@ -2282,6 +2282,11 @@ function renderPanelImages() {
     wrapper.style.height = `${panel.image.height}px`;
     wrapper.style.pointerEvents = 'auto';
     wrapper.style.transformOrigin = '0 0';
+    const img = document.createElement('img');
+    img.src = panel.image.src;
+    img.draggable = false;
+    img.addEventListener('dragstart', (event) => event.preventDefault());
+    wrapper.appendChild(img);
 
     const scale = panel.image.scale ?? 1;
     const rotation = panel.image.rotation ?? 0;
@@ -2938,7 +2943,12 @@ function renderBubbles() {
 
     textNode.appendChild(div);
     group.appendChild(textNode);
-
+  
+    groups.push(group);
+  });
+  if (defs.childNodes.length) {
+    layer.appendChild(defs);
+  }
     groups.push(group);
   });
 
@@ -2949,7 +2959,6 @@ function renderBubbles() {
   groups.forEach((group) => {
     layer.appendChild(group);
   });
-
     // pro5_: 组合框与其他圆形气泡的交界改为白色（缝合线）
   pro5_drawComboSeams();
   pro5_drawRectSeams();
