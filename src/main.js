@@ -124,6 +124,11 @@ function getBubbleTextColor(bubble) {
   return ensureBubbleFillColor(bubble) === BUBBLE_FILL_DARK ? BUBBLE_TEXT_LIGHT : BUBBLE_TEXT_DARK;
 }
 
+function getBubbleFillColor(bubble) {
+  if (!bubble) return '#ffffff';
+  return ensureBubbleFillColor(bubble) === BUBBLE_FILL_DARK ? '#000000' : '#ffffff';
+}
+
 // === pro5_: 刷新当前选中格框的 overlay/手柄 ===
 function pro5_refreshPanelOverlay() {
   // 优先走你现有的刷新方法（若有）
@@ -1719,6 +1724,7 @@ function applyInlineEditorStyling(bubble) {
     editor.style.caretColor = '';
     return;
   }
+  const fillColor = getBubbleFillColor(bubble);
   const fillColor = ensureBubbleFillColor(bubble) === BUBBLE_FILL_DARK ? '#000000' : '#ffffff';
   const textColor = getBubbleTextColor(bubble);
   editor.style.background = fillColor;
@@ -2619,6 +2625,7 @@ function renderBubbles() {
   state.bubbles.forEach((bubble) => {
    // 文本变化后：按当前宽度只增高到能容纳全部文本（不改宽度/比例）
     pro5_autoFitHeightOnText(bubble);
+    const fillColor = getBubbleFillColor(bubble);
     const fillColor = ensureBubbleFillColor(bubble);
     const textColor = getBubbleTextColor(bubble);
     const group = document.createElementNS(svgNS, 'g');
@@ -3413,6 +3420,7 @@ function drawBubblesToContext(ctx, options = {}) {
   state.bubbles.forEach((bubble) => {
     ctx.save();
     ctx.lineWidth = bubble.strokeWidth;
+    const fillColor = getBubbleFillColor(bubble);
     const fillColor = ensureBubbleFillColor(bubble);
     const textColor = getBubbleTextColor(bubble);
     ctx.strokeStyle = '#11141b';
