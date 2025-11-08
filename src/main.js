@@ -5,6 +5,7 @@ const elements = {
   hiddenImageInput: document.getElementById('hidden-image-input'),
   bubbleType: document.getElementById('bubble-type'),
   strokeWidth: document.getElementById('stroke-width'),
+  bubbleFillColor: document.getElementById('bubble-fill-color'),
   insertBubble: document.getElementById('insert-bubble'),
   removeBubble: document.getElementById('remove-bubble'),
   viewport: document.getElementById('viewport'),
@@ -38,10 +39,19 @@ const elements = {
   hiddenPanelImageInput: document.getElementById('hidden-panel-image-input'),
 };
 
+if (elements.bubbleFillColor) {
+  elements.bubbleFillColor.value = 'white';
+  elements.bubbleFillColor.disabled = true;
+}
+
 const HANDLE_DIRECTIONS = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
 const CONTROL_PADDING = 28;
 const MIN_BODY_SIZE = 80;
 const PANEL_MIN_SIZE = 60;
+const BUBBLE_FILL_DEFAULT = 'white';
+const BUBBLE_FILL_DARK = 'black';
+const BUBBLE_TEXT_DARK = '#11141b';
+const BUBBLE_TEXT_LIGHT = '#ffffff';
 
 const state = {
   canvas: { width: 1200, height: 1600 },
@@ -51,6 +61,7 @@ const state = {
   nextBubbleId: 1,
   selectedBubbleId: null,
   defaultStrokeWidth: 2,
+  defaultBubbleFillColor: BUBBLE_FILL_DEFAULT,
   fontFamily: elements.fontFamily.value,
   fontSize: 24,
   bold: false,
@@ -95,6 +106,28 @@ const panelOverlayState = {
   box: null,
   handles: new Map(),
 };
+
+function normalizeBubbleFillColor(color) {
+  return color === BUBBLE_FILL_DARK ? BUBBLE_FILL_DARK : BUBBLE_FILL_DEFAULT;
+}
+
+function ensureBubbleFillColor(bubble) {
+  if (!bubble) return BUBBLE_FILL_DEFAULT;
+  const normalized = normalizeBubbleFillColor(bubble.fillColor);
+  if (bubble.fillColor !== normalized) {
+    bubble.fillColor = normalized;
+  }
+  return normalized;
+}
+
+function getBubbleTextColor(bubble) {
+  return ensureBubbleFillColor(bubble) === BUBBLE_FILL_DARK ? BUBBLE_TEXT_LIGHT : BUBBLE_TEXT_DARK;
+}
+
+function getBubbleFillColor(bubble) {
+  if (!bubble) return '#ffffff';
+  return ensureBubbleFillColor(bubble) === BUBBLE_FILL_DARK ? '#000000' : '#ffffff';
+}
 
 // === pro5_: 刷新当前选中格框的 overlay/手柄 ===
 function pro5_refreshPanelOverlay() {
@@ -366,6 +399,7 @@ function attachEvents() {
   elements.insertBubble?.addEventListener('click', insertBubbleFromControls);
   elements.removeBubble?.addEventListener('click', removeSelectedBubble);
   elements.strokeWidth?.addEventListener('change', handleStrokeChange);
+  elements.bubbleFillColor?.addEventListener('change', handleBubbleFillColorChange);
   elements.fontFamily?.addEventListener('change', handleFontFamilyChange);
   elements.fontSize?.addEventListener('change', handleFontSizeChange);
   elements.toggleBold?.addEventListener('click', toggleBold);
@@ -550,10 +584,13 @@ function updateSceneTransform() {
   elements.scene.style.transform = t;
    // 你要保留“叠加层跟随场景”的思路，就同步给 overlay：
   if (elements.selectionOverlay) elements.selectionOverlay.style.transform = t;
+  if (elements.panelOverlay) elements.panelOverlay.style.transform = t;
   elements.zoomIndicator.textContent = `缩放：${Math.round(zoom * 100)}%`;
    // 等浏览器把 transform 应用完，再刷新选框，避免取到旧布局
   cancelAnimationFrame(state._pro5_selRaf || 0);
   state._pro5_selRaf = requestAnimationFrame(updateSelectionOverlay);
+  cancelAnimationFrame(state._pro5_panelRaf || 0);
+  state._pro5_panelRaf = requestAnimationFrame(updatePanelOverlay);
 }
 
 function worldToScreen(point) {
@@ -677,7 +714,7 @@ function pro5_computeFontForBubble(bubble) {
   );
   const fontWeight = bubble?.bold ? '700' : fallbackBold ? '700' : '400';
   const textAlign = bubble?.textAlign || 'center'; // 你项目里文本通常居中
-  const color = bubble?.color || '#10131c';
+  const color = bubble ? getBubbleTextColor(bubble) : BUBBLE_TEXT_DARK;
 
   return { fontFamily, fontSize, lineHeight, fontWeight, textAlign, color };
 }
@@ -1067,11 +1104,11 @@ function pro5_drawRectSeams() {
       // 建 B 的 clipPath
       const clipRef = ensureClipFor(B);
 
-      // 画一条沿 A 边框的白线，并裁剪到 B 的内部区域
+      // 画一条沿 A 边框的同色线，并裁剪到 B 的内部区域
       const seam = document.createElementNS(svgNS, 'path');
       seam.setAttribute('d', dA);
       seam.setAttribute('fill', 'none');
-      seam.setAttribute('stroke', '#ffffff');
+      seam.setAttribute('stroke', getBubbleFillColor(B));
       seam.setAttribute('stroke-width', seamSW);
       seam.setAttribute('vector-effect', 'non-scaling-stroke');
       seam.setAttribute('stroke-linecap', 'round');
@@ -1134,6 +1171,7 @@ function insertBubble(type) {
     height,
     padding: Math.max(28, Math.min(width, height) * 0.12),
     strokeWidth: Number(elements.strokeWidth.value) || state.defaultStrokeWidth,
+    fillColor: normalizeBubbleFillColor(state.defaultBubbleFillColor),
     fontFamily: state.fontFamily,
     fontSize: state.fontSize,
     bold: state.bold,
@@ -1271,6 +1309,29 @@ function handleStrokeChange() {
     pushHistory();
     render();
   }
+}
+
+function handleBubbleFillColorChange() {
+  const value = normalizeBubbleFillColor(elements.bubbleFillColor.value);
+  if (elements.bubbleFillColor) {
+    elements.bubbleFillColor.value = value;
+  }
+  state.defaultBubbleFillColor = value;
+  const bubble = getSelectedBubble();
+  if (!bubble) {
+    return;
+  }
+  if (ensureBubbleFillColor(bubble) === value) {
+    render();
+    return;
+  }
+  bubble.fillColor = value;
+  if (state.inlineEditingBubbleId === bubble.id) {
+    applyInlineEditorStyling(bubble);
+  }
+  pushHistory();
+  render();
+  updateControlsFromSelection();
 }
 
 function handleFontFamilyChange() {
@@ -1636,7 +1697,15 @@ function updateControlsFromSelection() {
   if (!bubble) {
     elements.textContent.value = '';
     elements.positionIndicator.textContent = '';
+    if (elements.bubbleFillColor) {
+      elements.bubbleFillColor.value = state.defaultBubbleFillColor;
+      elements.bubbleFillColor.disabled = true;
+    }
     return;
+  }
+  if (elements.bubbleFillColor) {
+    elements.bubbleFillColor.disabled = false;
+    elements.bubbleFillColor.value = ensureBubbleFillColor(bubble);
   }
   elements.strokeWidth.value = bubble.strokeWidth;
   elements.fontFamily.value = bubble.fontFamily;
@@ -1644,6 +1713,22 @@ function updateControlsFromSelection() {
   elements.toggleBold.dataset.active = bubble.bold ? 'true' : 'false';
   elements.textContent.value = bubble.text;
   elements.positionIndicator.textContent = `位置：(${bubble.x.toFixed(0)}, ${bubble.y.toFixed(0)}) 尺寸：${bubble.width.toFixed(0)}×${bubble.height.toFixed(0)}`;
+}
+
+function applyInlineEditorStyling(bubble) {
+  const editor = elements.inlineEditor;
+  if (!editor) return;
+  if (!bubble) {
+    editor.style.background = 'transparent';
+    editor.style.color = BUBBLE_TEXT_DARK;
+    editor.style.caretColor = '';
+    return;
+  }
+  const fillColor = getBubbleFillColor(bubble);
+  const textColor = getBubbleTextColor(bubble);
+  editor.style.background = fillColor;
+  editor.style.color = textColor;
+  editor.style.caretColor = textColor;
 }
 
 function openInlineEditor(bubble) {
@@ -1661,6 +1746,7 @@ function openInlineEditor(bubble) {
   editor.style.fontFamily = bubble.fontFamily;
   editor.style.fontSize = `${bubble.fontSize}px`;
   editor.style.fontWeight = bubble.bold ? '700' : '400';
+  applyInlineEditorStyling(bubble);
   editor.classList.remove('hidden');
   editor.focus();
   editor.setSelectionRange(editor.value.length, editor.value.length);
@@ -1676,6 +1762,7 @@ elements.inlineEditor.addEventListener('blur', () => {
   elements.inlineEditor.classList.add('hidden');
   state.inlineEditingBubbleId = null;
   elements.textContent.value = bubble.text;
+  applyInlineEditorStyling(null);
   pushHistory();
   render();
 });
@@ -2019,20 +2106,29 @@ function updatePanelOverlay() {
     return;
   }
   overlayRoot.classList.remove('hidden');
-  const topLeft = worldToScreen({ x: panel.x, y: panel.y });
-  const bottomRight = worldToScreen({ x: panel.x + panel.width, y: panel.y + panel.height });
-  panelOverlayState.box.style.left = `${topLeft.x}px`;
-  panelOverlayState.box.style.top = `${topLeft.y}px`;
-  panelOverlayState.box.style.width = `${bottomRight.x - topLeft.x}px`;
-  panelOverlayState.box.style.height = `${bottomRight.y - topLeft.y}px`;
+  const overlayFollowsScene = !!overlayRoot.style.transform;
+
+  if (overlayFollowsScene) {
+    panelOverlayState.box.style.left = `${panel.x}px`;
+    panelOverlayState.box.style.top = `${panel.y}px`;
+    panelOverlayState.box.style.width = `${panel.width}px`;
+    panelOverlayState.box.style.height = `${panel.height}px`;
+  } else {
+    const topLeft = worldToScreen({ x: panel.x, y: panel.y });
+    const bottomRight = worldToScreen({ x: panel.x + panel.width, y: panel.y + panel.height });
+    panelOverlayState.box.style.left = `${topLeft.x}px`;
+    panelOverlayState.box.style.top = `${topLeft.y}px`;
+    panelOverlayState.box.style.width = `${bottomRight.x - topLeft.x}px`;
+    panelOverlayState.box.style.height = `${bottomRight.y - topLeft.y}px`;
+  }
 
   HANDLE_DIRECTIONS.forEach((dir) => {
     const handle = panelOverlayState.handles.get(dir);
     if (!handle) return;
     const position = computePanelHandlePosition(panel, dir);
-    const screenPos = worldToScreen(position);
-    handle.style.left = `${screenPos.x}px`;
-    handle.style.top = `${screenPos.y}px`;
+    const pt = overlayFollowsScene ? position : worldToScreen(position);
+    handle.style.left = `${pt.x}px`;
+    handle.style.top = `${pt.y}px`;
   });
 }
 
@@ -2528,6 +2624,8 @@ function renderBubbles() {
   state.bubbles.forEach((bubble) => {
    // 文本变化后：按当前宽度只增高到能容纳全部文本（不改宽度/比例）
     pro5_autoFitHeightOnText(bubble);
+    const fillColor = getBubbleFillColor(bubble);
+    const textColor = getBubbleTextColor(bubble);
     const group = document.createElementNS(svgNS, 'g');
     group.dataset.bubbleId = bubble.id;
     group.classList.add('bubble');
@@ -2535,12 +2633,16 @@ function renderBubbles() {
     const body = createBodyShape(bubble);
     body.classList.add('bubble-body');
     body.setAttribute('stroke-width', bubble.strokeWidth);
+    body.setAttribute('fill', fillColor);
+    body.setAttribute('stroke', '#11141b');
     group.appendChild(body);
 
     const tailElement = createTailShape(bubble);
     if (tailElement) {
       tailElement.classList.add('bubble-tail');
       tailElement.setAttribute('stroke-width', bubble.strokeWidth);
+      tailElement.setAttribute('fill', fillColor);
+      tailElement.setAttribute('stroke', '#11141b');
       group.appendChild(tailElement);
     }
 
@@ -2569,6 +2671,7 @@ function renderBubbles() {
     div.style.whiteSpace = state.pro5_autoWrapEnabled ? 'pre-wrap' : 'pre';
     div.style.wordBreak  = state.pro5_autoWrapEnabled ? 'break-word' : 'normal';
     div.style.textAlign  = 'left';
+    div.style.color = textColor;
     div.textContent      = pro5_sanitizeText(bubble.text);
 
     textNode.appendChild(div);
@@ -2681,6 +2784,7 @@ function pro5_drawComboSeams() {
     // ✅ 用 combo 自身生成“椭圆参数”
     const EA = ellipseFromBubble(combo);
     if (!EA) return;
+    const seamColor = getBubbleFillColor(combo);
 
     candidates.forEach((other) => {
       if (other.id === combo.id) return;
@@ -2699,7 +2803,7 @@ function pro5_drawComboSeams() {
         const p = document.createElementNS(svgNS, 'path');
         p.setAttribute('d', d);
         p.setAttribute('fill', 'none');
-        p.setAttribute('stroke', '#ffffff');
+        p.setAttribute('stroke', seamColor);
         p.setAttribute('stroke-width', seamSW);
         p.setAttribute('vector-effect', 'non-scaling-stroke');
         p.setAttribute('stroke-linecap', 'round');
@@ -3151,16 +3255,17 @@ function renderPro5degHandles(bubble) {
   const apexAbs = normToAbs(bubble, bubble.tail.apex);
   const aimAbs = normToAbs(bubble, bubble.tail.aim);
 
-  const apexScreen = worldToScreen(apexAbs);
-  const aimScreen = worldToScreen(aimAbs);
+  const overlayFollowsScene = Boolean(elements.selectionOverlay && elements.selectionOverlay.style.transform);
+  const apexPoint = overlayFollowsScene ? apexAbs : worldToScreen(apexAbs);
+  const aimPoint = overlayFollowsScene ? aimAbs : worldToScreen(aimAbs);
 
   apexHandle.style.display = 'block';
-  apexHandle.style.left = `${apexScreen.x}px`;
-  apexHandle.style.top = `${apexScreen.y}px`;
+  apexHandle.style.left = `${apexPoint.x}px`;
+  apexHandle.style.top = `${apexPoint.y}px`;
 
   aimHandle.style.display = 'block';
-  aimHandle.style.left = `${aimScreen.x}px`;
-  aimHandle.style.top = `${aimScreen.y}px`;
+  aimHandle.style.left = `${aimPoint.x}px`;
+  aimHandle.style.top = `${aimPoint.y}px`;
 }
 
 function onPro5HandlePointerDown(event) {
@@ -3250,7 +3355,11 @@ function undo() {
   if (state.historyIndex <= 0) return;
   state.historyIndex -= 1;
   const snapshot = JSON.parse(state.history[state.historyIndex]);
-  state.bubbles = snapshot.bubbles.map((bubble) => ({ ...bubble }));
+  state.bubbles = snapshot.bubbles.map((bubble) => {
+    const copy = { ...bubble };
+    copy.fillColor = normalizeBubbleFillColor(copy.fillColor);
+    return copy;
+  });
   state.selectedBubbleId = snapshot.selectedBubbleId;
   state.viewport = { ...snapshot.viewport };
   restorePageFrame(snapshot.pageFrame);
@@ -3309,8 +3418,10 @@ function drawBubblesToContext(ctx, options = {}) {
   state.bubbles.forEach((bubble) => {
     ctx.save();
     ctx.lineWidth = bubble.strokeWidth;
+    const fillColor = getBubbleFillColor(bubble);
+    const textColor = getBubbleTextColor(bubble);
     ctx.strokeStyle = '#11141b';
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = fillColor;
     if (includeBodies) {
     if (bubble.type === 'speech-pro-5deg') {
       const d = pro5_mergedEllipseTailPath(bubble);
@@ -3364,7 +3475,7 @@ function drawBubblesToContext(ctx, options = {}) {
          // 用编辑端同源的“显示文本”（已按规则转为 \n）
       const displayText = getBubbleDisplayText(bubble);
       const lines = displayText ? displayText.split('\n') : [''];
-      ctx.fillStyle = '#11141b';
+      ctx.fillStyle = textColor;
       ctx.font = `${bubble.bold ? 'bold ' : ''}${fontSize}px ${bubble.fontFamily}`;
       
       ctx.textBaseline = 'top';
@@ -3557,7 +3668,7 @@ async function buildTextLayer(bubble) {
     // 裁剪框上下各放宽 1px，避免顶部被吞
   textCtx.rect(rx, ry - 1, rw, rh + 2);
   textCtx.clip();
-  textCtx.fillStyle = '#11141b';
+  textCtx.fillStyle = getBubbleTextColor(bubble);
   textCtx.font = `${bubble.bold ? 'bold ' : ''}${fontSize}px ${bubble.fontFamily}`;
   textCtx.textBaseline = 'top';
   textCtx.textAlign = 'left';
@@ -3774,8 +3885,13 @@ async function pro5_canvasFromCurrentSVG() {
   style.textContent = `
     /* 不导出黄色虚线框 */
     .bubble-outline{ display:none !important; }
-    /* 对白外观（避免默认黑填充） */
-    .bubble-body,.bubble-tail{ fill:#fff; stroke:#11141b; }
+    /* 对白外观（描边与填充透明度） */
+    .bubble-body,
+    .bubble-tail{
+      stroke:#11141b;
+      vector-effect:non-scaling-stroke;
+      fill-opacity:0.98;
+    }
     .text-layer{ overflow:visible }
     /* 文本容器：使整段居中；内部行保持左对齐 */
     .bubble-text-display{
@@ -3834,7 +3950,6 @@ async function pro5_rasterizeBubbleLayerToCanvas(ctx, W, H) {
   style.textContent = `
     .bubble-body,
     .bubble-tail {
-      fill: #ffffff;
       stroke: #11141b;
       vector-effect: non-scaling-stroke;
       fill-opacity: 0.98;
