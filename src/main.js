@@ -347,6 +347,10 @@ function init() {
   setupSelectionOverlay();
   setupPanelOverlay();
   attachEvents();
+  if (elements.baseImage) {
+    elements.baseImage.draggable = false;
+    elements.baseImage.addEventListener('dragstart', (event) => event.preventDefault());
+  }
   elements.strokeWidth.value = state.defaultStrokeWidth; // ← 让UI初始显示 2
   updateSceneSize(state.canvas.width, state.canvas.height);
   fitViewport();
@@ -423,6 +427,7 @@ function attachEvents() {
   elements.panelLayer?.addEventListener('wheel', handlePanelWheel, { passive: false });
   elements.panelLayer?.addEventListener('contextmenu', (event) => event.preventDefault());
   elements.panelLayer?.addEventListener('dblclick', handlePanelDoubleClick);
+  elements.panelLayer?.addEventListener('dragstart', (event) => event.preventDefault());
   elements.hiddenPanelImageInput?.addEventListener('change', handlePanelImageSelection);
   // === 面板图片层：图片元素有 pointer-events:auto，事件需要在该层也监听 ===
   if (elements.panelImageLayer) {
@@ -430,6 +435,7 @@ function attachEvents() {
     elements.panelImageLayer?.addEventListener('wheel', handlePanelWheel, { passive: false });
     elements.panelImageLayer?.addEventListener('contextmenu', (event) => event.preventDefault());
     elements.panelImageLayer?.addEventListener('dblclick', handlePanelDoubleClick);
+    elements.panelImageLayer?.addEventListener('dragstart', (event) => event.preventDefault());
   }
   elements.panelMarginHorizontal?.addEventListener('change', handlePanelMarginChange);
   elements.panelMarginVertical?.addEventListener('change', handlePanelMarginChange);
@@ -2271,6 +2277,8 @@ function renderPanelImages() {
     wrapper.style.pointerEvents = 'auto';
     const img = document.createElement('img');
     img.src = panel.image.src;
+    img.draggable = false;
+    img.addEventListener('dragstart', (event) => event.preventDefault());
     wrapper.appendChild(img);
 
     const scale = panel.image.scale ?? 1;
@@ -2371,12 +2379,13 @@ function handlePanelRotationChange() {
 
 function handlePanelPointerDown(event) {
   if (!state.pageFrame.active) return;
+  event.preventDefault();
+  event.stopPropagation();
+  window.getSelection()?.removeAllRanges();
   const point = clientToWorldPoint(event);
   const pf = state.pageFrame;
   const frameRect = { x: pf.x, y: pf.y, width: pf.width, height: pf.height };
   const isInsideFrame = isPointInRect(point, frameRect);
-
-  event.stopPropagation();
 
   if (event.button === 2) {
     const panel = findPanelAtPoint(point);
@@ -2919,6 +2928,7 @@ function renderBubbles() {
     group.appendChild(textNode);
 
     groups.push(group);
+
   });
 
   if (defs.childNodes.length) {
@@ -2928,7 +2938,6 @@ function renderBubbles() {
   groups.forEach((group) => {
     layer.appendChild(group);
   });
-
     // pro5_: 组合框与其他圆形气泡的交界改为白色（缝合线）
   pro5_drawComboSeams();
   pro5_drawRectSeams();
