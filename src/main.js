@@ -2030,10 +2030,10 @@ function pastePanelFromClipboard() {
   }
 
   pf.panels.push(newPanel);
-  render();
-  setSelectedPanel(newPanel.id);
-  pushHistory();
-  return true;
+   (typeof renderPanels === 'function' ? renderPanels : render)();
+   setSelectedPanel(newPanel.id);
+   pushHistory();
+   return true;
 }
 
 function deleteSelectedPanel() {
