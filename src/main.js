@@ -1725,7 +1725,6 @@ function applyInlineEditorStyling(bubble) {
     return;
   }
   const fillColor = getBubbleFillColor(bubble);
-  const fillColor = ensureBubbleFillColor(bubble) === BUBBLE_FILL_DARK ? '#000000' : '#ffffff';
   const textColor = getBubbleTextColor(bubble);
   editor.style.background = fillColor;
   editor.style.color = textColor;
@@ -2626,7 +2625,6 @@ function renderBubbles() {
    // 文本变化后：按当前宽度只增高到能容纳全部文本（不改宽度/比例）
     pro5_autoFitHeightOnText(bubble);
     const fillColor = getBubbleFillColor(bubble);
-    const fillColor = ensureBubbleFillColor(bubble);
     const textColor = getBubbleTextColor(bubble);
     const group = document.createElementNS(svgNS, 'g');
     group.dataset.bubbleId = bubble.id;
@@ -3421,7 +3419,6 @@ function drawBubblesToContext(ctx, options = {}) {
     ctx.save();
     ctx.lineWidth = bubble.strokeWidth;
     const fillColor = getBubbleFillColor(bubble);
-    const fillColor = ensureBubbleFillColor(bubble);
     const textColor = getBubbleTextColor(bubble);
     ctx.strokeStyle = '#11141b';
     ctx.fillStyle = fillColor;
