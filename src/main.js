@@ -90,6 +90,7 @@ const state = {
   },
   panelInteraction: null,
   panelImageTargetId: null,
+  panelClipboard: null,
 };
 
 const overlay = {
@@ -1856,6 +1857,69 @@ function createPanel(x, y, width, height) {
   };
 }
 
+function clonePanelData(panel) {
+  if (!panel) return null;
+  return {
+    x: panel.x,
+    y: panel.y,
+    width: panel.width,
+    height: panel.height,
+    image: panel.image
+      ? {
+          src: panel.image.src,
+          width: panel.image.width,
+          height: panel.image.height,
+          scale: panel.image.scale,
+          rotation: panel.image.rotation,
+          offsetX: panel.image.offsetX,
+          offsetY: panel.image.offsetY,
+        }
+      : null,
+  };
+}
+
+function copySelectedPanel() {
+  const panel = getSelectedPanel();
+  if (!panel) return false;
+  state.panelClipboard = clonePanelData(panel);
+  return true;
+}
+
+function pastePanelFromClipboard() {
+  const clipboard = state.panelClipboard;
+  const pf = state.pageFrame;
+  if (!clipboard || !pf.active) return false;
+
+  const offset = 20;
+  const maxX = pf.x + Math.max(0, pf.width - clipboard.width);
+  const maxY = pf.y + Math.max(0, pf.height - clipboard.height);
+  const nextX = clamp(clipboard.x + offset, pf.x, maxX);
+  const nextY = clamp(clipboard.y + offset, pf.y, maxY);
+
+  const newPanel = createPanel(nextX, nextY, clipboard.width, clipboard.height);
+  if (clipboard.image) {
+    newPanel.image = { ...clipboard.image };
+  }
+
+  pf.panels.push(newPanel);
+  renderPanels();
+  setSelectedPanel(newPanel.id);
+  pushHistory();
+  return true;
+}
+
+function deleteSelectedPanel() {
+  const pf = state.pageFrame;
+  const panel = getSelectedPanel();
+  if (!panel) return false;
+
+  pf.panels = pf.panels.filter((item) => item.id !== panel.id);
+  renderPanels();
+  setSelectedPanel(null);
+  pushHistory();
+  return true;
+}
+
 function getSelectedPanel() {
   const { selectedPanelId, panels } = state.pageFrame;
   if (!selectedPanelId) return null;
@@ -2229,18 +2293,10 @@ function handlePanelPointerDown(event) {
   }
 
   const panel = findPanelAtPoint(point);
+  const wantsSplit = event.ctrlKey || event.metaKey;
   if (panel) {
     setSelectedPanel(panel.id);
-    if (event.shiftKey) {
-      state.panelInteraction = {
-        type: 'move-panel',
-        pointerId: event.pointerId,
-        panelId: panel.id,
-        startX: event.clientX,
-        startY: event.clientY,
-        startRect: { x: panel.x, y: panel.y, width: panel.width, height: panel.height },
-      };
-    } else {
+    if (wantsSplit) {
       state.panelInteraction = {
         type: 'split',
         pointerId: event.pointerId,
@@ -2249,9 +2305,25 @@ function handlePanelPointerDown(event) {
         lastPoint: point,
         orientation: null,
       };
+    } else {
+      state.panelInteraction = {
+        type: 'move-panel',
+        pointerId: event.pointerId,
+        panelId: panel.id,
+        startX: event.clientX,
+        startY: event.clientY,
+        startRect: { x: panel.x, y: panel.y, width: panel.width, height: panel.height },
+      };
     }
   } else {
     setSelectedPanel(null);
+    state.panelInteraction = {
+      type: 'drag-frame',
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      frameStart: { x: pf.x, y: pf.y },
+    };
   }
 
   if (state.panelInteraction) {
@@ -3330,10 +3402,30 @@ function handleKeyDown(event) {
     target === elements.textContent ||
     target instanceof HTMLInputElement ||
     target instanceof HTMLTextAreaElement;
+  const isModifierActive = event.ctrlKey || event.metaKey;
+
+  if (isModifierActive && event.key.toLowerCase() === 'c' && !isTextInput) {
+    if (copySelectedPanel()) {
+      event.preventDefault();
+      return;
+    }
+  }
+
+  if (isModifierActive && event.key.toLowerCase() === 'v' && !isTextInput) {
+    if (pastePanelFromClipboard()) {
+      event.preventDefault();
+      return;
+    }
+  }
+
   if (event.key === 'Delete' && !isTextInput) {
+    if (deleteSelectedPanel()) {
+      event.preventDefault();
+      return;
+    }
     removeSelectedBubble();
   }
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+  if (isModifierActive && event.key.toLowerCase() === 'z') {
     event.preventDefault();
     undo();
   }
