@@ -550,10 +550,13 @@ function updateSceneTransform() {
   elements.scene.style.transform = t;
    // 你要保留“叠加层跟随场景”的思路，就同步给 overlay：
   if (elements.selectionOverlay) elements.selectionOverlay.style.transform = t;
+  if (elements.panelOverlay) elements.panelOverlay.style.transform = t;
   elements.zoomIndicator.textContent = `缩放：${Math.round(zoom * 100)}%`;
    // 等浏览器把 transform 应用完，再刷新选框，避免取到旧布局
   cancelAnimationFrame(state._pro5_selRaf || 0);
   state._pro5_selRaf = requestAnimationFrame(updateSelectionOverlay);
+  cancelAnimationFrame(state._pro5_panelRaf || 0);
+  state._pro5_panelRaf = requestAnimationFrame(updatePanelOverlay);
 }
 
 function worldToScreen(point) {
@@ -2019,20 +2022,29 @@ function updatePanelOverlay() {
     return;
   }
   overlayRoot.classList.remove('hidden');
-  const topLeft = worldToScreen({ x: panel.x, y: panel.y });
-  const bottomRight = worldToScreen({ x: panel.x + panel.width, y: panel.y + panel.height });
-  panelOverlayState.box.style.left = `${topLeft.x}px`;
-  panelOverlayState.box.style.top = `${topLeft.y}px`;
-  panelOverlayState.box.style.width = `${bottomRight.x - topLeft.x}px`;
-  panelOverlayState.box.style.height = `${bottomRight.y - topLeft.y}px`;
+  const overlayFollowsScene = !!overlayRoot.style.transform;
+
+  if (overlayFollowsScene) {
+    panelOverlayState.box.style.left = `${panel.x}px`;
+    panelOverlayState.box.style.top = `${panel.y}px`;
+    panelOverlayState.box.style.width = `${panel.width}px`;
+    panelOverlayState.box.style.height = `${panel.height}px`;
+  } else {
+    const topLeft = worldToScreen({ x: panel.x, y: panel.y });
+    const bottomRight = worldToScreen({ x: panel.x + panel.width, y: panel.y + panel.height });
+    panelOverlayState.box.style.left = `${topLeft.x}px`;
+    panelOverlayState.box.style.top = `${topLeft.y}px`;
+    panelOverlayState.box.style.width = `${bottomRight.x - topLeft.x}px`;
+    panelOverlayState.box.style.height = `${bottomRight.y - topLeft.y}px`;
+  }
 
   HANDLE_DIRECTIONS.forEach((dir) => {
     const handle = panelOverlayState.handles.get(dir);
     if (!handle) return;
     const position = computePanelHandlePosition(panel, dir);
-    const screenPos = worldToScreen(position);
-    handle.style.left = `${screenPos.x}px`;
-    handle.style.top = `${screenPos.y}px`;
+    const pt = overlayFollowsScene ? position : worldToScreen(position);
+    handle.style.left = `${pt.x}px`;
+    handle.style.top = `${pt.y}px`;
   });
 }
 
