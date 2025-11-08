@@ -8,6 +8,7 @@ const elements = {
   bubbleFillColor: document.getElementById('bubble-fill-color'),
   insertBubble: document.getElementById('insert-bubble'),
   removeBubble: document.getElementById('remove-bubble'),
+  placeBubbleIntoPanel: document.getElementById('place-bubble-into-panel'),
   viewport: document.getElementById('viewport'),
   scene: document.getElementById('scene'),
   bubbleLayer: document.getElementById('bubble-layer'),
@@ -90,6 +91,7 @@ const state = {
   },
   panelInteraction: null,
   panelImageTargetId: null,
+  panelClipboard: null,
 };
 
 const overlay = {
@@ -398,6 +400,7 @@ function attachEvents() {
   elements.hiddenImageInput?.addEventListener('change', handleImageSelection);
   elements.insertBubble?.addEventListener('click', insertBubbleFromControls);
   elements.removeBubble?.addEventListener('click', removeSelectedBubble);
+  elements.placeBubbleIntoPanel?.addEventListener('click', placeSelectedBubbleIntoPanel);
   elements.strokeWidth?.addEventListener('change', handleStrokeChange);
   elements.bubbleFillColor?.addEventListener('change', handleBubbleFillColorChange);
   elements.fontFamily?.addEventListener('change', handleFontFamilyChange);
@@ -1177,6 +1180,7 @@ function insertBubble(type) {
     bold: state.bold,
     text: '',
     tail: createDefaultTail(type, x, y, width, height),
+    panelId: null,
   };
   state.bubbles.push(bubble);
   setSelectedBubble(bubble.id);
@@ -1298,6 +1302,34 @@ function removeSelectedBubble() {
   pushHistory();
   render();
   updateControlsFromSelection();
+}
+
+function placeSelectedBubbleIntoPanel() {
+  const bubble = getSelectedBubble();
+  if (!canPlaceBubbleIntoPanel(bubble)) return;
+
+  const pf = state.pageFrame;
+  const bounds = getBubbleVisualBounds(bubble);
+  let targetPanel = null;
+  let bestArea = 0;
+
+  pf.panels.forEach((panel) => {
+    const area = rectIntersectionArea(bounds, panel);
+    if (area > bestArea) {
+      bestArea = area;
+      targetPanel = panel;
+    }
+  });
+
+  if (!targetPanel) return;
+  if (bubble.panelId === targetPanel.id) {
+    updateBubblePanelPlacementButton();
+    return;
+  }
+
+  bubble.panelId = targetPanel.id;
+  pushHistory();
+  render();
 }
 
 function handleStrokeChange() {
@@ -1694,6 +1726,7 @@ function updateControlsFromSelection() {
   const bubble = getSelectedBubble();
   const hasSelection = Boolean(bubble);
   elements.removeBubble.disabled = !hasSelection;
+  updateBubblePanelPlacementButton();
   if (!bubble) {
     elements.textContent.value = '';
     elements.positionIndicator.textContent = '';
@@ -1817,11 +1850,107 @@ function getTextRect(bubble) {
   };
 }
 
+function getBubbleVisualBounds(bubble) {
+  const bounds = {
+    minX: bubble.x,
+    minY: bubble.y,
+    maxX: bubble.x + bubble.width,
+    maxY: bubble.y + bubble.height,
+  };
+
+  if (bubble.tail) {
+    const tailPoints = [];
+    if (bubble.type === 'speech-pro-5deg') {
+      if (bubble.tail.apex) {
+        tailPoints.push(normToAbs(bubble, bubble.tail.apex));
+      }
+      if (bubble.tail.aim) {
+        tailPoints.push(normToAbs(bubble, bubble.tail.aim));
+      }
+    } else {
+      const base = getTailBase(bubble);
+      if (base) {
+        tailPoints.push(base);
+      }
+      const tip = getTailTip(bubble);
+      if (tip) {
+        tailPoints.push(tip);
+      }
+    }
+    tailPoints.forEach((point) => {
+      if (!point) return;
+      bounds.minX = Math.min(bounds.minX, point.x);
+      bounds.minY = Math.min(bounds.minY, point.y);
+      bounds.maxX = Math.max(bounds.maxX, point.x);
+      bounds.maxY = Math.max(bounds.maxY, point.y);
+    });
+  }
+
+  return {
+    x: bounds.minX,
+    y: bounds.minY,
+    width: bounds.maxX - bounds.minX,
+    height: bounds.maxY - bounds.minY,
+  };
+}
+
+function rectIntersectionArea(a, b) {
+  const ax2 = a.x + a.width;
+  const ay2 = a.y + a.height;
+  const bx2 = b.x + b.width;
+  const by2 = b.y + b.height;
+  const ix = Math.max(0, Math.min(ax2, bx2) - Math.max(a.x, b.x));
+  const iy = Math.max(0, Math.min(ay2, by2) - Math.max(a.y, b.y));
+  return ix * iy;
+}
+
+function rectsIntersect(a, b) {
+  return rectIntersectionArea(a, b) > 0;
+}
+
+function cleanupBubblePanelAttachments() {
+  const pf = state.pageFrame;
+  const panels = pf.active ? pf.panels : [];
+  const panelById = new Map(panels.map((panel) => [panel.id, panel]));
+  state.bubbles.forEach((bubble) => {
+    if (bubble.panelId == null) {
+      bubble.panelId = null;
+      return;
+    }
+    const panel = panelById.get(bubble.panelId);
+    if (!panel) {
+      bubble.panelId = null;
+      return;
+    }
+    const bounds = getBubbleVisualBounds(bubble);
+    if (!rectsIntersect(bounds, panel)) {
+      bubble.panelId = null;
+    }
+  });
+}
+
+function canPlaceBubbleIntoPanel(bubble) {
+  if (!bubble) return false;
+  if (bubble.type !== 'speech-pro-5deg') return false;
+  const pf = state.pageFrame;
+  if (!pf.active || !pf.panels.length) return false;
+  const bounds = getBubbleVisualBounds(bubble);
+  return pf.panels.some((panel) => rectsIntersect(bounds, panel));
+}
+
+function updateBubblePanelPlacementButton() {
+  if (!elements.placeBubbleIntoPanel) return;
+  const bubble = getSelectedBubble();
+  elements.placeBubbleIntoPanel.disabled = !canPlaceBubbleIntoPanel(bubble);
+}
+
 function render() {
+  cleanupBubblePanelAttachments();
   renderPanels();
   renderBubbles();
   updateSelectionOverlay();
   updatePanelOverlay();
+  updateBubblePanelPlacementButton();
 }
 
 function updatePanelControlsFromState() {
@@ -1854,6 +1983,69 @@ function createPanel(x, y, width, height) {
     height,
     image: null,
   };
+}
+
+function clonePanelData(panel) {
+  if (!panel) return null;
+  return {
+    x: panel.x,
+    y: panel.y,
+    width: panel.width,
+    height: panel.height,
+    image: panel.image
+      ? {
+          src: panel.image.src,
+          width: panel.image.width,
+          height: panel.image.height,
+          scale: panel.image.scale,
+          rotation: panel.image.rotation,
+          offsetX: panel.image.offsetX,
+          offsetY: panel.image.offsetY,
+        }
+      : null,
+  };
+}
+
+function copySelectedPanel() {
+  const panel = getSelectedPanel();
+  if (!panel) return false;
+  state.panelClipboard = clonePanelData(panel);
+  return true;
+}
+
+function pastePanelFromClipboard() {
+  const clipboard = state.panelClipboard;
+  const pf = state.pageFrame;
+  if (!clipboard || !pf.active) return false;
+
+  const offset = 20;
+  const maxX = pf.x + Math.max(0, pf.width - clipboard.width);
+  const maxY = pf.y + Math.max(0, pf.height - clipboard.height);
+  const nextX = clamp(clipboard.x + offset, pf.x, maxX);
+  const nextY = clamp(clipboard.y + offset, pf.y, maxY);
+
+  const newPanel = createPanel(nextX, nextY, clipboard.width, clipboard.height);
+  if (clipboard.image) {
+    newPanel.image = { ...clipboard.image };
+  }
+
+  pf.panels.push(newPanel);
+  render();
+  setSelectedPanel(newPanel.id);
+  pushHistory();
+  return true;
+}
+
+function deleteSelectedPanel() {
+  const pf = state.pageFrame;
+  const panel = getSelectedPanel();
+  if (!panel) return false;
+
+  pf.panels = pf.panels.filter((item) => item.id !== panel.id);
+  render();
+  setSelectedPanel(null);
+  pushHistory();
+  return true;
 }
 
 function getSelectedPanel() {
@@ -2229,18 +2421,10 @@ function handlePanelPointerDown(event) {
   }
 
   const panel = findPanelAtPoint(point);
+  const wantsSplit = event.ctrlKey || event.metaKey;
   if (panel) {
     setSelectedPanel(panel.id);
-    if (event.shiftKey) {
-      state.panelInteraction = {
-        type: 'move-panel',
-        pointerId: event.pointerId,
-        panelId: panel.id,
-        startX: event.clientX,
-        startY: event.clientY,
-        startRect: { x: panel.x, y: panel.y, width: panel.width, height: panel.height },
-      };
-    } else {
+    if (wantsSplit) {
       state.panelInteraction = {
         type: 'split',
         pointerId: event.pointerId,
@@ -2249,9 +2433,25 @@ function handlePanelPointerDown(event) {
         lastPoint: point,
         orientation: null,
       };
+    } else {
+      state.panelInteraction = {
+        type: 'move-panel',
+        pointerId: event.pointerId,
+        panelId: panel.id,
+        startX: event.clientX,
+        startY: event.clientY,
+        startRect: { x: panel.x, y: panel.y, width: panel.width, height: panel.height },
+      };
     }
   } else {
     setSelectedPanel(null);
+    state.panelInteraction = {
+      type: 'drag-frame',
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      frameStart: { x: pf.x, y: pf.y },
+    };
   }
 
   if (state.panelInteraction) {
@@ -2392,6 +2592,7 @@ function handlePanelInteractionMove(event) {
     pf.horizontalMargin = pf.x;
     pf.verticalMargin = pf.y;
     renderPanels();
+    renderBubbles();
     updatePanelControlsFromState();
     updatePanelOverlay();
     return;
@@ -2405,6 +2606,7 @@ function handlePanelInteractionMove(event) {
     );
     movePanelWithinFrame(panel, interaction.startRect, delta);
     renderPanels();
+    renderBubbles();
     updatePanelOverlay();
     return;
   }
@@ -2417,6 +2619,7 @@ function handlePanelInteractionMove(event) {
     );
     applyPanelResize(panel, interaction.startRect, interaction.direction, delta);
     renderPanels();
+    renderBubbles();
     updatePanelOverlay();
     return;
   }
@@ -2464,6 +2667,7 @@ function finalizePanelInteraction(event) {
         const success = performPanelSplit(panel, interaction.orientation, interaction.lastPoint || interaction.startPoint);
         if (success) {
           renderPanels();
+          renderBubbles();
           updatePanelControlsFromState();
           updatePanelOverlay();
           changed = true;
@@ -2620,15 +2824,52 @@ function performPanelSplit(panel, orientation, splitPoint) {
 }
 
 function renderBubbles() {
-  elements.bubbleLayer.innerHTML = '';
+  const layer = elements.bubbleLayer;
+  layer.innerHTML = '';
+  const pf = state.pageFrame;
+  const panelsById = pf.active
+    ? new Map(pf.panels.map((panel) => [panel.id, panel]))
+    : new Map();
+  const defs = document.createElementNS(svgNS, 'defs');
+  const clipEntries = new Map();
+  const groups = [];
+
+  const ensurePanelClip = (panel) => {
+    let entry = clipEntries.get(panel.id);
+    if (!entry) {
+      const clipPath = document.createElementNS(svgNS, 'clipPath');
+      clipPath.setAttribute('id', `panel-clip-${panel.id}`);
+      clipPath.setAttribute('clipPathUnits', 'userSpaceOnUse');
+      const rect = document.createElementNS(svgNS, 'rect');
+      clipPath.appendChild(rect);
+      defs.appendChild(clipPath);
+      entry = { clipPath, rect };
+      clipEntries.set(panel.id, entry);
+    }
+    entry.rect.setAttribute('x', panel.x);
+    entry.rect.setAttribute('y', panel.y);
+    entry.rect.setAttribute('width', panel.width);
+    entry.rect.setAttribute('height', panel.height);
+    return entry.clipPath.id;
+  };
+
   state.bubbles.forEach((bubble) => {
-   // 文本变化后：按当前宽度只增高到能容纳全部文本（不改宽度/比例）
+    // 文本变化后：按当前宽度只增高到能容纳全部文本（不改宽度/比例）
     pro5_autoFitHeightOnText(bubble);
     const fillColor = getBubbleFillColor(bubble);
     const textColor = getBubbleTextColor(bubble);
     const group = document.createElementNS(svgNS, 'g');
     group.dataset.bubbleId = bubble.id;
     group.classList.add('bubble');
+
+    if (bubble.panelId != null && panelsById.has(bubble.panelId)) {
+      const panel = panelsById.get(bubble.panelId);
+      const clipId = ensurePanelClip(panel);
+      group.setAttribute('clip-path', `url(#${clipId})`);
+      group.dataset.panelId = String(panel.id);
+    } else if (bubble.panelId != null) {
+      bubble.panelId = null;
+    }
 
     const body = createBodyShape(bubble);
     body.classList.add('bubble-body');
@@ -2677,8 +2918,17 @@ function renderBubbles() {
     textNode.appendChild(div);
     group.appendChild(textNode);
 
-    elements.bubbleLayer.appendChild(group);
+    groups.push(group);
   });
+
+  if (defs.childNodes.length) {
+    layer.appendChild(defs);
+  }
+
+  groups.forEach((group) => {
+    layer.appendChild(group);
+  });
+
     // pro5_: 组合框与其他圆形气泡的交界改为白色（缝合线）
   pro5_drawComboSeams();
   pro5_drawRectSeams();
@@ -3330,10 +3580,30 @@ function handleKeyDown(event) {
     target === elements.textContent ||
     target instanceof HTMLInputElement ||
     target instanceof HTMLTextAreaElement;
+  const isModifierActive = event.ctrlKey || event.metaKey;
+
+  if (isModifierActive && event.key.toLowerCase() === 'c' && !isTextInput) {
+    if (copySelectedPanel()) {
+      event.preventDefault();
+      return;
+    }
+  }
+
+  if (isModifierActive && event.key.toLowerCase() === 'v' && !isTextInput) {
+    if (pastePanelFromClipboard()) {
+      event.preventDefault();
+      return;
+    }
+  }
+
   if (event.key === 'Delete' && !isTextInput) {
+    if (deleteSelectedPanel()) {
+      event.preventDefault();
+      return;
+    }
     removeSelectedBubble();
   }
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+  if (isModifierActive && event.key.toLowerCase() === 'z') {
     event.preventDefault();
     undo();
   }
@@ -3415,8 +3685,20 @@ async function drawImageToCanvas(ctx, src, width, height) {
 
 function drawBubblesToContext(ctx, options = {}) {
   const { includeText = true, includeBodies = true } = options;
+  const pf = state.pageFrame;
+  const panelsById = pf.active
+    ? new Map(pf.panels.map((panel) => [panel.id, panel]))
+    : null;
   state.bubbles.forEach((bubble) => {
     ctx.save();
+    if (panelsById && bubble.panelId != null) {
+      const panel = panelsById.get(bubble.panelId);
+      if (panel) {
+        ctx.beginPath();
+        ctx.rect(panel.x, panel.y, panel.width, panel.height);
+        ctx.clip();
+      }
+    }
     ctx.lineWidth = bubble.strokeWidth;
     const fillColor = getBubbleFillColor(bubble);
     const textColor = getBubbleTextColor(bubble);
