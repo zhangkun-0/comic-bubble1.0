@@ -444,12 +444,12 @@ button[data-active='true'] {
 }
 
 .panel-image {
- position: absolute;
- top: 0; 
- left: 0; 
- transform-origin: center; 
- pointer-events: auto; 
- user-select: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  pointer-events: auto;
+  user-select: none;
 }
 
 .panel-image img {
