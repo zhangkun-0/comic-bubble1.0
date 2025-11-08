@@ -164,15 +164,17 @@ function pro5_refreshPanelOverlay() {
    return { padX: Math.round(fontSize * 0.6 * scale), padY: Math.round(fontSize * 0.5 * scale) };
  }
 // === pro5_: 从当前 state 直接合成一张 Canvas（不依赖 DOM 截图/不走 mask） ===
-function pro5_renderCanvasFromState() {
+function pro5_renderCanvasFromState(options = {}) {
+  const { includeBaseImage = true } = options;
   // 守护式检查
   const pf = state.pageFrame;
   const imgEl = elements.baseImage;
-  const hasBase = !!(imgEl && imgEl.naturalWidth && imgEl.naturalHeight);
+  const baseAvailable = !!(imgEl && imgEl.naturalWidth && imgEl.naturalHeight);
+  const hasBase = includeBaseImage && baseAvailable;
 
   // 画布尺寸：优先用底图原始尺寸；无底图则用 pageFrame 尺寸
-  const W = hasBase ? imgEl.naturalWidth  : Math.max(1, pf?.width  || 1);
-  const H = hasBase ? imgEl.naturalHeight : Math.max(1, pf?.height || 1);
+  const W = baseAvailable ? imgEl.naturalWidth  : Math.max(1, pf?.width  || 1);
+  const H = baseAvailable ? imgEl.naturalHeight : Math.max(1, pf?.height || 1);
 
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(W);
@@ -2928,9 +2930,6 @@ function renderBubbles() {
     group.appendChild(textNode);
 
     groups.push(group);
-
-  });
-
   if (defs.childNodes.length) {
     layer.appendChild(defs);
   }
@@ -2938,6 +2937,7 @@ function renderBubbles() {
   groups.forEach((group) => {
     layer.appendChild(group);
   });
+
     // pro5_: 组合框与其他圆形气泡的交界改为白色（缝合线）
   pro5_drawComboSeams();
   pro5_drawRectSeams();
@@ -3662,14 +3662,15 @@ function clamp(value, min, max) {
   //}
 //}
 
-async function exportRaster(format) {
+async function exportRaster(format, options = {}) {
+  const { includeBaseImage = false } = options;
   const canvas = document.createElement('canvas');
   canvas.width = state.canvas.width;
   canvas.height = state.canvas.height;
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  if (state.image.src) {
+  if (includeBaseImage && state.image.src) {
     await drawImageToCanvas(ctx, state.image.src, canvas.width, canvas.height);
   }
   drawBubblesToContext(ctx, { includeText: true });
@@ -3912,7 +3913,7 @@ async function buildLayers() {
   return layers;
 }
 
-async function buildImageLayer() {
+async function buildImageLayer({ includeBaseImage = false } = {}) {
   if (!state.image.src) return null;
   const canvas = document.createElement('canvas');
   canvas.width = state.canvas.width;
@@ -3920,7 +3921,9 @@ async function buildImageLayer() {
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  await drawImageToCanvas(ctx, state.image.src, canvas.width, canvas.height);
+  if (includeBaseImage) {
+    await drawImageToCanvas(ctx, state.image.src, canvas.width, canvas.height);
+  }
   return buildRasterLayer('漫画图片', canvas);
 }
 
@@ -4067,14 +4070,14 @@ function pascalString(name) {
   return buffer;
 }
 
-async function createCompositeImage() {
+async function createCompositeImage({ includeBaseImage = false } = {}) {
   const canvas = document.createElement('canvas');
   canvas.width = state.canvas.width;
   canvas.height = state.canvas.height;
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  if (state.image.src) {
+  if (includeBaseImage && state.image.src) {
     await drawImageToCanvas(ctx, state.image.src, canvas.width, canvas.height);
   }
   drawBubblesToContext(ctx, { includeText: true, includeBodies: true });
@@ -4132,7 +4135,8 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 // === pro5_: 当前所见 SVG → Canvas（同像素、所见即所得） ===
-async function pro5_canvasFromCurrentSVG() {
+async function pro5_canvasFromCurrentSVG(options = {}) {
+  const { includeBaseImage = true } = options;
   const svg = elements.svgRoot || document.querySelector('svg');
   if (!svg) throw new Error('找不到根 SVG');
 
@@ -4209,7 +4213,7 @@ async function pro5_canvasFromCurrentSVG() {
   ctx.imageSmoothingEnabled = false;
 
    // 先画背景（保持原始分辨率，不缩放二次）
-  if (bgBitmap) {
+  if (includeBaseImage && bgBitmap) {
     ctx.drawImage(bgBitmap, 0, 0, w, h);
   }
 
@@ -4285,10 +4289,10 @@ async function pro5_rasterizeBubbleLayerToCanvas(ctx, W, H) {
   }
 }
 // === pro5_: 异步合成（底图 + 面板图片 + 气泡外形 + 文本）===
-async function pro5_renderCanvasFromStateAsync() {
+async function pro5_renderCanvasFromStateAsync(options = {}) {
   // 1) 先用已通过的同步合成（底图 + 面板图）
   const canvas = (typeof pro5_renderCanvasFromState === 'function')
-    ? pro5_renderCanvasFromState()
+    ? pro5_renderCanvasFromState(options)
     : (() => {
         console.warn('pro5_: 缺少 pro5_renderCanvasFromState，退回空画布');
         const c = document.createElement('canvas'); c.width = c.height = 1; return c;
@@ -4381,7 +4385,7 @@ async function pro5_rasterizeBubbleLayerToCanvas(ctx, W, H) {
 
 // === pro5_: 导出 PNG（无损） ===
 async function pro5_exportPNG() {
-  const canvas = await pro5_renderCanvasFromStateAsync();
+  const canvas = await pro5_renderCanvasFromStateAsync({ includeBaseImage: false });
   const url = canvas.toDataURL('image/png');
   const a = document.createElement('a');
   a.href = url; a.download = 'export.png'; a.click();
@@ -4389,7 +4393,7 @@ async function pro5_exportPNG() {
 
 // === pro5_: 导出 JPG（有损） ===
 async function pro5_exportJPG(quality = 1.0) {
-  const canvas = await pro5_renderCanvasFromStateAsync();
+  const canvas = await pro5_renderCanvasFromStateAsync({ includeBaseImage: false });
   const url = canvas.toDataURL('image/jpeg', quality);
   const a = document.createElement('a');
   a.href = url; a.download = 'export.jpg'; a.click();
