@@ -2928,8 +2928,9 @@ function renderBubbles() {
 
     textNode.appendChild(div);
     group.appendChild(textNode);
-
+  
     groups.push(group);
+  });
   if (defs.childNodes.length) {
     layer.appendChild(defs);
   }
