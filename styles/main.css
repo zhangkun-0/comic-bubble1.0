@@ -260,6 +260,7 @@ button[data-active='true'] {
   top: 0;
   left: 0;
   pointer-events: none;
+  transform-origin: top left; /* 关键：与 #scene 同原点 */
 }
 
 #selection-overlay.hidden {
@@ -407,7 +408,7 @@ button[data-active='true'] {
   width: 100%;
   height: 100%;
   display: block;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 #panel-layer .panel-fill {
@@ -420,7 +421,7 @@ button[data-active='true'] {
 }
 
 #panel-layer .panel-rect {
-  fill: rgba(17, 20, 27, 0.01);
+  fill: rgba(0, 0, 0, 0.01);
   stroke: #10131c;
   vector-effect: non-scaling-stroke;
 }
@@ -443,21 +444,13 @@ button[data-active='true'] {
   pointer-events: auto;
 }
 
-.panel-image-frame {
-  position: absolute;
-  top: 0;
-  left: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
-
 .panel-image {
-  position: absolute;
-  top: 0;
-  left: 0;
-  transform-origin: center;
-  pointer-events: auto;
-  user-select: none;
+ position: absolute;
+ top: 0; 
+ left: 0; 
+ transform-origin: center; 
+ pointer-events: auto; 
+ user-select: none;
 }
 
 .panel-image img {
@@ -466,11 +459,20 @@ button[data-active='true'] {
   pointer-events: none;
 }
 
+.panel-image-frame {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+  pointer-events: none; /* 很关键 */
+}
+
 #panel-overlay {
   position: absolute;
   top: 0;
   left: 0;
   pointer-events: none;
+  transform-origin: top left; /* ✅ 新增：让它与 #scene 同步缩放平移 */
 }
 
 #panel-overlay.hidden {
