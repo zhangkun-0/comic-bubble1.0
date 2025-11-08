@@ -95,6 +95,29 @@ const panelOverlayState = {
   box: null,
   handles: new Map(),
 };
+
+// === pro5_: 刷新当前选中格框的 overlay/手柄 ===
+function pro5_refreshPanelOverlay() {
+  // 优先走你现有的刷新方法（若有）
+  if (typeof updatePanelOverlayFromState === 'function') {
+    updatePanelOverlayFromState();
+    return;
+  }
+  if (typeof renderPanelOverlay === 'function') {
+    renderPanelOverlay();
+    return;
+  }
+  // 兜底：重复设置一次选中ID，触发你已有的选中逻辑（不改变状态，只强制刷新UI）
+  const id = state?.selectedPanelId || state?.selectedPanel?.id;
+  if (!id || typeof setSelectedPanel !== 'function') return;
+  try {
+    // 允许 setSelectedPanel 接受 silent=true（如果你的实现支持）
+    setSelectedPanel(id, true);
+  } catch {
+    setSelectedPanel(id);
+  }
+}
+
  // === pro5_: 把四挡 padding 换算成像素（相对当前字号，更稳妥） ===
  function pro5_computeTextPaddingFromPreset(bubble) {
    if (!bubble) return { padX: 12, padY: 10 };
@@ -105,6 +128,109 @@ const panelOverlayState = {
    const scale = scaleMap[preset] || 1.0;
    return { padX: Math.round(fontSize * 0.6 * scale), padY: Math.round(fontSize * 0.5 * scale) };
  }
+// === pro5_: 从当前 state 直接合成一张 Canvas（不依赖 DOM 截图/不走 mask） ===
+function pro5_renderCanvasFromState() {
+  // 守护式检查
+  const pf = state.pageFrame;
+  const imgEl = elements.baseImage;
+  const hasBase = !!(imgEl && imgEl.naturalWidth && imgEl.naturalHeight);
+
+  // 画布尺寸：优先用底图原始尺寸；无底图则用 pageFrame 尺寸
+  const W = hasBase ? imgEl.naturalWidth  : Math.max(1, pf?.width  || 1);
+  const H = hasBase ? imgEl.naturalHeight : Math.max(1, pf?.height || 1);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(W);
+  canvas.height = Math.round(H);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas;
+
+  // 先铺白底
+  ctx.save();
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.restore();
+
+  // 1) 画底图
+  if (hasBase) {
+    // 假设 scene 中的底图是等比拉伸到页面尺寸，这里按原始像素画满
+    ctx.drawImage(imgEl, 0, 0, canvas.width, canvas.height);
+  }
+
+  // 2) 逐格绘制面板内的图片（裁剪到 panel 矩形，支持 scale/rotation/offset）
+  if (pf?.active && Array.isArray(pf.panels)) {
+    pf.panels.forEach((panel) => {
+      const pimg = panel.image;
+      if (!pimg || !pimg.src || !pimg.width || !pimg.height) return;
+
+      const img = new Image();
+      img.src = pimg.src;
+
+      // 注意：为避免异步卡导出，这里同步绘制可能遇到未缓存完成的图片；
+      // 你的面板图片都是用户刚选的 dataURL，浏览器会立即可用，通常可同步绘制。
+      // 若担心个别浏览器异步，后续可改为 await Promise.all 预加载。
+      // === 裁剪到面板矩形 ===
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(panel.x, panel.y, panel.width, panel.height);
+      ctx.clip();
+
+      // 计算变换：以面板中心为原点，附加 offset/旋转/缩放
+      const scale   = pimg.scale   ?? 1;
+      const rotDeg  = pimg.rotation ?? 0;
+      const rotRad  = rotDeg * Math.PI / 180;
+      const offX    = pimg.offsetX ?? 0;
+      const offY    = pimg.offsetY ?? 0;
+
+      const cx = panel.x + panel.width  / 2 + offX;
+      const cy = panel.y + panel.height / 2 + offY;
+
+      ctx.translate(cx, cy);
+      ctx.rotate(rotRad);
+      ctx.scale(scale, scale);
+
+      // 将图片中心对齐原点
+      const dw = pimg.width;
+      const dh = pimg.height;
+      ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+
+      ctx.restore();
+
+      // 可选：导出时给面板描边（不走 SVG/mask）
+      if (pf.lineWidth) {
+        ctx.save();
+        ctx.strokeStyle = '#10131c';
+        ctx.lineWidth = pf.lineWidth;
+        ctx.strokeRect(panel.x, panel.y, panel.width, panel.height);
+        ctx.restore();
+      }
+    });
+  }
+
+  // TODO（后续若需要）：对白气泡（SVG/foreignObject）导出
+  // 若要导出对白，我们可以在此读取你的 bubble 数据模型，逐个用 Canvas 画。
+  // 先保证格内图片导出正确，再逐步加。
+
+  return canvas;
+}
+
+ function pro5_routePanelDblclickFirst(event) {
+  // 仅做路由，不触发全局导入
+  const point = clientToWorldPoint(event);
+  const panel = findPanelAtPoint(point);
+  if (!panel) return; // 不在格内就不管，保持你取消全局双击的设计
+
+  event.stopPropagation();
+  event.preventDefault();
+
+  setSelectedPanel(panel.id);
+  state.panelImageTargetId = panel.id;
+  if (elements.hiddenPanelImageInput) {
+    elements.hiddenPanelImageInput.value = '';
+    elements.hiddenPanelImageInput.click();
+  }
+}
+
 // === pro5_: 简单双字宽换行（中文），标点尽量落行尾 ===
 function pro5_wrapTextChinese(text, charsPerLine = 5) {
   const cpl = Math.max(4, Math.min(10, charsPerLine|0));
@@ -233,6 +359,8 @@ function setupPanelOverlay() {
 }
 
 function attachEvents() {
+  elements.viewport?.addEventListener('dblclick', pro5_routePanelDblclickFirst, true);
+
   elements.importButton?.addEventListener('click', handleImportButtonClick);
   elements.hiddenImageInput?.addEventListener('change', handleImageSelection);
   elements.insertBubble?.addEventListener('click', insertBubbleFromControls);
@@ -418,9 +546,14 @@ function fitViewport() {
 
 function updateSceneTransform() {
   const { zoom, offsetX, offsetY } = state.viewport;
-  elements.scene.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${zoom})`;
+  const t = `translate(${offsetX}px, ${offsetY}px) scale(${zoom})`;
+  elements.scene.style.transform = t;
+   // 你要保留“叠加层跟随场景”的思路，就同步给 overlay：
+  if (elements.selectionOverlay) elements.selectionOverlay.style.transform = t;
   elements.zoomIndicator.textContent = `缩放：${Math.round(zoom * 100)}%`;
-  updateSelectionOverlay();
+   // 等浏览器把 transform 应用完，再刷新选框，避免取到旧布局
+  cancelAnimationFrame(state._pro5_selRaf || 0);
+  state._pro5_selRaf = requestAnimationFrame(updateSelectionOverlay);
 }
 
 function worldToScreen(point) {
@@ -510,6 +643,129 @@ function rayIntersectEllipse(px, py, ux, uy, cx, cy, rx, ry) {
     t,
   };
 }
+
+// === pro5_: 从 bubble 对象里稳健取出文本 ===
+function pro5_getBubbleText(bubble) {
+  if (!bubble) return '';
+  // 常见字段兜底顺序
+  return (
+    bubble.text?.content ??
+    bubble.text?.value ??
+    bubble.text ??
+    bubble.content ??
+    bubble.plainText ??
+    ''
+  );
+}
+
+// === pro5_: 计算气泡字体（优先气泡自身样式 -> 控件值 -> 默认为微软雅黑 18px）===
+function pro5_computeFontForBubble(bubble) {
+  const fallbackFamily =
+    (elements.fontFamily && elements.fontFamily.value) ||
+    "'Microsoft YaHei','微软雅黑',sans-serif";
+  const fallbackSize =
+    (elements.fontSize && parseFloat(elements.fontSize.value)) || 18;
+  const fallbackBold =
+    (typeof state?.textBold === 'boolean' ? state.textBold : false) ||
+    !!bubble?.bold;
+
+  const fontFamily = bubble?.fontFamily || fallbackFamily;
+  const fontSize = Math.max(10, Math.round(bubble?.fontSize || fallbackSize));
+  const lineHeight = Math.max(
+    fontSize * 1.3,
+    Math.round((bubble?.lineHeight || 1.3) * fontSize)
+  );
+  const fontWeight = bubble?.bold ? '700' : fallbackBold ? '700' : '400';
+  const textAlign = bubble?.textAlign || 'center'; // 你项目里文本通常居中
+  const color = bubble?.color || '#10131c';
+
+  return { fontFamily, fontSize, lineHeight, fontWeight, textAlign, color };
+}
+
+// === pro5_: 简单而稳的自动换行（支持中英/空格/换行符）===
+function pro5_wrapLines(ctx, text, maxWidth) {
+  if (!text) return [];
+  const paras = String(text).replace(/\r/g, '').split('\n');
+  const lines = [];
+
+  for (const para of paras) {
+    let cur = '';
+    // 对中文/无空格文本按字符试探，对英文按词组优先
+    const tokens = /[\u4e00-\u9fa5]/.test(para) ? [...para] : para.split(/(\s+)/);
+
+    for (const tk of tokens) {
+      const test = cur + tk;
+      const w = ctx.measureText(test).width;
+      if (w <= maxWidth || cur === '') {
+        cur = test;
+      } else {
+        // 超宽则换行
+        lines.push(cur.trim());
+        cur = tk.trimStart(); // 行首不保留多余空格
+      }
+    }
+    if (cur) lines.push(cur.trim());
+  }
+  return lines;
+}
+
+// === pro5_: 在 Canvas 上绘制所有对白文本 ===
+async function pro5_drawBubbleTextsOnCanvas(ctx) {
+  const list = Array.isArray(state?.bubbles) ? state.bubbles : [];
+  if (!list.length) return;
+
+  for (const bubble of list) {
+    // 守护：必须有文本和几何
+    const text = pro5_getBubbleText(bubble);
+    if (!text) continue;
+
+    // 只读抽象层：用你现有的 getTextRect(bubble)
+    if (typeof getTextRect !== 'function') continue;
+    const rect = getTextRect(bubble);
+    if (!rect || !isFinite(rect.x + rect.y + rect.width + rect.height)) continue;
+    if (rect.width <= 2 || rect.height <= 2) continue;
+
+    // 计算字体与排版
+    const { fontFamily, fontSize, lineHeight, fontWeight, textAlign, color } =
+      pro5_computeFontForBubble(bubble);
+
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = textAlign === 'center' ? 'center' :
+                    textAlign === 'right'  ? 'right'  : 'left';
+    ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+
+    // 计算换行
+    const innerW = Math.max(2, rect.width);
+    const lines = pro5_wrapLines(ctx, text, innerW);
+    if (!lines.length) {
+      ctx.restore();
+      continue;
+    }
+
+    // 垂直居中：整体块高度
+    const blockH = lines.length * lineHeight;
+    // 根据对齐方式确定 x 起点
+    let x;
+    if (ctx.textAlign === 'center') x = rect.x + rect.width / 2;
+    else if (ctx.textAlign === 'right') x = rect.x + rect.width;
+    else x = rect.x;
+
+    // y 起点：使文本块垂直居中
+    let y = rect.y + (rect.height - blockH) / 2 + lineHeight * 0.8;
+
+    for (const line of lines) {
+      ctx.fillText(line, x, y);
+      y += lineHeight;
+      // 若需要强行不溢出，可加：if (y > rect.y + rect.height) break;
+    }
+
+    ctx.restore();
+  }
+}
+
+
 // === pro5_: 根据自动换行后的文本尺寸，动态调整 bubble.width / height ===
 function pro5_fitBubbleToText(bubble) {
   if (!state.pro5_autoWrapEnabled) return;
@@ -1911,6 +2167,9 @@ function handlePanelPointerDown(event) {
 
 function handlePanelDoubleClick(event) {
   // 先拦截，防止冒泡到 viewport 触发全局导入
+  console.log('✅ 双击事件触发');
+  console.log('🎯 命中格框 =', findPanelAtPoint(clientToWorldPoint(event)));
+
   event.stopPropagation();
   event.preventDefault();
   if (event.button !== 0) return;
@@ -2786,20 +3045,41 @@ function updateSelectionOverlay() {
     return;
   }
   elements.selectionOverlay.classList.remove('hidden');
+
+  // ✅ 叠加层是否已跟随场景 transform（我们在 updateSceneTransform 里设置过）
+  const overlayFollowsScene =
+    !!(elements.selectionOverlay && elements.selectionOverlay.style.transform);
+
   const overlayRect = getOverlayRect(bubble);
-  const topLeft = worldToScreen({ x: overlayRect.x, y: overlayRect.y });
-  const bottomRight = worldToScreen({ x: overlayRect.x + overlayRect.width, y: overlayRect.y + overlayRect.height });
-  overlay.box.style.left = `${topLeft.x}px`;
-  overlay.box.style.top = `${topLeft.y}px`;
-  overlay.box.style.width = `${bottomRight.x - topLeft.x}px`;
-  overlay.box.style.height = `${bottomRight.y - topLeft.y}px`;
+
+  let left, top, width, height;
+  if (overlayFollowsScene) {
+    // 叠加层已被同一 transform 作用：直接用世界坐标（避免二次换算导致错位）
+    left = overlayRect.x;
+    top = overlayRect.y;
+    width = overlayRect.width;
+    height = overlayRect.height;
+  } else {
+    // 叠加层未随场景变换：继续用原来的 world→screen 转换
+    const topLeft = worldToScreen({ x: overlayRect.x, y: overlayRect.y });
+    const bottomRight = worldToScreen({ x: overlayRect.x + overlayRect.width, y: overlayRect.y + overlayRect.height });
+    left = topLeft.x;
+    top = topLeft.y;
+    width = bottomRight.x - topLeft.x;
+    height = bottomRight.y - topLeft.y;
+  }
+
+  overlay.box.style.left = `${left}px`;
+  overlay.box.style.top = `${top}px`;
+  overlay.box.style.width = `${width}px`;
+  overlay.box.style.height = `${height}px`;
 
   HANDLE_DIRECTIONS.forEach((dir) => {
     const handle = overlay.handles.get(dir);
     const position = computeHandlePosition(bubble, dir);
-    const screenPos = worldToScreen(position);
-    handle.style.left = `${screenPos.x}px`;
-    handle.style.top = `${screenPos.y}px`;
+    const pt = overlayFollowsScene ? position : worldToScreen(position);
+    handle.style.left = `${pt.x}px`;
+    handle.style.top = `${pt.y}px`;
   });
 
   if (bubble.type === 'speech-pro-5deg') {
@@ -2807,14 +3087,16 @@ function updateSelectionOverlay() {
   } else if (bubble.tail) {
     overlay.tailHandle.style.display = 'block';
     const tailTip = getTailTip(bubble);
-    const screenPos = worldToScreen(tailTip);
-    overlay.tailHandle.style.left = `${screenPos.x}px`;
-    overlay.tailHandle.style.top = `${screenPos.y}px`;
+    const pt = overlayFollowsScene ? tailTip : worldToScreen(tailTip);
+    overlay.tailHandle.style.left = `${pt.x}px`;
+    overlay.tailHandle.style.top = `${pt.y}px`;
   } else {
     overlay.tailHandle.style.display = 'none';
   }
+
   renderPro5degHandles(bubble);
-  elements.positionIndicator.textContent = `位置：(${bubble.x.toFixed(0)}, ${bubble.y.toFixed(0)}) 尺寸：${bubble.width.toFixed(0)}×${bubble.height.toFixed(0)}`;
+  elements.positionIndicator.textContent =
+    `位置：(${bubble.x.toFixed(0)}, ${bubble.y.toFixed(0)}) 尺寸：${bubble.width.toFixed(0)}×${bubble.height.toFixed(0)}`;
 }
 
 function ensurePro5Handle(type, color) {
@@ -3534,20 +3816,179 @@ async function pro5_canvasFromCurrentSVG() {
   ctx.drawImage(img, 0, 0, w, h);
   return canvas;
 }
+// === pro5_: 将 bubble-layer 以“安全 SVG”栅格化绘制到 Canvas ===
+// 关键：移除 <foreignObject>（避免 taint），并内联必要样式让气泡外形可见
+async function pro5_rasterizeBubbleLayerToCanvas(ctx, W, H) {
+  const svgEl = elements.bubbleLayer;
+  if (!svgEl) return;                               // 守护式检查
+  if ((svgEl.tagName || '').toLowerCase() !== 'svg') return;
+
+  // 1) 克隆一份 SVG
+  const svgCopy = svgEl.cloneNode(true);
+
+  // 2) 移除所有 foreignObject（这些会导致 taint）
+  svgCopy.querySelectorAll('foreignObject').forEach(node => node.remove());
+
+  // 3) 注入最小内联样式，保证纯 SVG 图形能正确显示（不依赖外部 CSS）
+  const style = document.createElement('style');
+  style.textContent = `
+    .bubble-body,
+    .bubble-tail {
+      fill: #ffffff;
+      stroke: #11141b;
+      vector-effect: non-scaling-stroke;
+      fill-opacity: 0.98;
+    }
+    .bubble-outline {
+      fill: none;
+      stroke: #ffd65c;
+      stroke-width: 1.2;
+      stroke-dasharray: 6 6;
+      vector-effect: non-scaling-stroke;
+    }
+  `;
+  // 把样式塞到 <svg> 开头，避免被后续元素覆盖
+  svgCopy.insertBefore(style, svgCopy.firstChild);
+
+  // 4) 设定尺寸与视窗
+  svgCopy.setAttribute('width',  String(W));
+  svgCopy.setAttribute('height', String(H));
+  svgCopy.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+  // 5) 序列化为 SVG 文本，并确保 xmlns
+  const serializer = new XMLSerializer();
+  let svgText = serializer.serializeToString(svgCopy);
+  if (!svgText.includes('xmlns="http://www.w3.org/2000/svg"')) {
+    svgText = svgText.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+  }
+
+  // 6) 生成 blob URL 并绘制到画布（不 taint）
+  const blob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
+  const url  = URL.createObjectURL(blob);
+
+  try {
+    await new Promise((resolve, reject) => {
+      const img = new Image();
+      // blob: URL 同源，无需 crossOrigin
+      img.onload  = () => { ctx.drawImage(img, 0, 0, W, H); resolve(); };
+      img.onerror = reject;
+      img.src = url;
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+// === pro5_: 异步合成（底图 + 面板图片 + 气泡外形 + 文本）===
+async function pro5_renderCanvasFromStateAsync() {
+  // 1) 先用已通过的同步合成（底图 + 面板图）
+  const canvas = (typeof pro5_renderCanvasFromState === 'function')
+    ? pro5_renderCanvasFromState()
+    : (() => {
+        console.warn('pro5_: 缺少 pro5_renderCanvasFromState，退回空画布');
+        const c = document.createElement('canvas'); c.width = c.height = 1; return c;
+      })();
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas;
+
+  // 2) 尺寸
+  const W = canvas.width, H = canvas.height;
+
+  // 3) 叠加气泡外形（导出时已在克隆 SVG 里移除了 foreignObject 与黄线）
+  try { await pro5_rasterizeBubbleLayerToCanvas(ctx, W, H); }
+  catch (e) { console.warn('pro5_: 气泡SVG绘制失败，已跳过。', e); }
+
+  // 4) 叠加对白文字（Canvas 绘制）
+  try { await pro5_drawBubbleTextsOnCanvas(ctx); }
+  catch (e) { console.warn('pro5_: 文本绘制失败，已跳过。', e); }
+
+  return canvas;
+}
+
+// （可选）确保全局可见
+window.pro5_renderCanvasFromStateAsync = pro5_renderCanvasFromStateAsync;
+
+
+// === pro5_: 将 bubble-layer 以“安全 SVG”栅格化绘制到 Canvas ===
+// 关键：移除 <foreignObject>（避免 taint），并在导出时隐藏黄线（bubble-outline）
+async function pro5_rasterizeBubbleLayerToCanvas(ctx, W, H) {
+  const svgEl = elements.bubbleLayer;
+  if (!svgEl) return;                               // 守护式检查
+  if ((svgEl.tagName || '').toLowerCase() !== 'svg') return;
+
+  // === 1) 克隆一份 SVG，只用于导出，不影响编辑层 ===
+  const svgCopy = svgEl.cloneNode(true);
+
+  // === 2) 移除所有 foreignObject（这些会导致 taint）===
+  svgCopy.querySelectorAll('foreignObject').forEach(node => node.remove());
+
+  // === 3) 临时隐藏黄线（仅导出用，不影响原界面）===
+  //    直接删除所有 .bubble-outline 元素
+  svgCopy.querySelectorAll('.bubble-outline').forEach(node => node.remove());
+
+  // === 4) 注入内联样式，保证气泡主体正常显示，同时兜底隐藏黄线 ===
+  const style = document.createElement('style');
+  style.textContent = `
+    .bubble-body,
+    .bubble-tail {
+      fill: #ffffff;
+      stroke: #11141b;
+      vector-effect: non-scaling-stroke;
+      fill-opacity: 0.98;
+    }
+    /* pro5_: 导出时隐藏黄线（若仍残留类名，也强制隐藏） */
+    .bubble-outline { display: none !important; }
+  `;
+  svgCopy.insertBefore(style, svgCopy.firstChild);
+
+  // === 5) 设置尺寸与视窗 ===
+  svgCopy.setAttribute('width',  String(W));
+  svgCopy.setAttribute('height', String(H));
+  svgCopy.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+  // === 6) 序列化为 SVG 文本并确保 xmlns ===
+  const serializer = new XMLSerializer();
+  let svgText = serializer.serializeToString(svgCopy);
+  if (!svgText.includes('xmlns="http://www.w3.org/2000/svg"')) {
+    svgText = svgText.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+  }
+
+  // === 7) 生成 blob URL 并绘制到画布（安全，不 taint） ===
+  const blob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
+  const url  = URL.createObjectURL(blob);
+
+  try {
+    await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload  = () => { 
+        ctx.drawImage(img, 0, 0, W, H);
+        resolve(); 
+      };
+      img.onerror = reject;
+      img.src = url;
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 
 // === pro5_: 导出 PNG（无损） ===
 async function pro5_exportPNG() {
-  const canvas = await pro5_canvasFromCurrentSVG();
+  const canvas = await pro5_renderCanvasFromStateAsync();
   const url = canvas.toDataURL('image/png');
   const a = document.createElement('a');
   a.href = url; a.download = 'export.png'; a.click();
 }
 
+// === pro5_: 导出 JPG（有损） ===
 async function pro5_exportJPG(quality = 1.0) {
-  const canvas = await pro5_canvasFromCurrentSVG();
+  const canvas = await pro5_renderCanvasFromStateAsync();
   const url = canvas.toDataURL('image/jpeg', quality);
   const a = document.createElement('a');
   a.href = url; a.download = 'export.jpg'; a.click();
 }
+
+
 
 init();
